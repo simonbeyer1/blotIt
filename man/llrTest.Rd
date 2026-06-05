@@ -11,6 +11,9 @@ llrTest(H0, H1, check = TRUE)
 case of \code{H1}.}
 
 \item{H1}{output of \link{alignReplicates}, the general case}
+
+\item{check}{logical, if \code{TRUE} verify that \code{H0} is nested in
+\code{H1} before computing the statistic.}
 }
 \value{
 list with the log-likelihood ratio, statistical information and the

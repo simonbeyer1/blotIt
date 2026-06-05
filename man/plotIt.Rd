@@ -42,7 +42,7 @@ of points with corresponding error bars. It must be one of
 \code{plotLine} will be plotted as a smooth spline instead of straight lines
 between points.}
 
-\item{scales}{String passed as \code{scales} argument to \link{facet_wrap}.}
+\item{scales}{String passed as \code{scales} argument to \link[ggplot2]{facet_wrap}.}
 
 \item{alignZeros}{Logical, if \code{TRUE}, the zero ticks are aligned
 between the facets.}
@@ -51,10 +51,10 @@ between the facets.}
 data is added to the plot.}
 
 \item{ncol}{Numerical passed as \code{ncol} argument to
-\link{facet_wrap}.}
+\link[ggplot2]{facet_wrap}.}
 
 \item{useColors}{vector of custom color values as taken by the \code{values}
-argument in the \link{scale_color_manual} method for \code{ggplot} objects.}
+argument in the \link[ggplot2]{scale_color_manual} method for \code{ggplot} objects.}
 
 \item{useOrder}{Optional list of target names in the custom order that will
 be used for faceting.}
@@ -68,12 +68,30 @@ be used for faceting.}
 \item{doseValueName}{name of the column that should be used for the x axis in
 case of a dose response plot. The default is 'dose'}
 
-\item{labelX}{Optional, value passed to \code{xlab} parameter of \link{ggplot}
+\item{labelX}{Optional, value passed to \code{xlab} parameter of \link[ggplot2]{ggplot}
 for the x-axis. Default is \code{NULL} leading to 'Time' or 'Dose',
 respectively.}
 
-\item{labelY}{Optional, value passed to \code{ylab} parameter of \link{ggplot}
+\item{labelY}{Optional, value passed to \code{ylab} parameter of \link[ggplot2]{ggplot}
 for the y-axis. Default is \code{NULL} leading to 'Signal'.}
+
+\item{FacetLabels}{String, either 'simple' or 'full'. Results in the value of
+the facets being printed either separated by underscores ('simple') or
+with the respective facet names ('full')
+
+\describe{
+To reproduce the known function \code{plot1}, \code{plot2} and \code{plot3},
+use:
+\item{plot1}{
+\code{plotPoints} = 'original', \code{plotLine} = 'prediction'
+}
+\item{plot2}{
+\code{plotPoints} = 'scaled', \code{plotLine} = 'aligned'
+}
+\item{plot3}{
+\code{plotPoints} = 'aligned', \code{plotLine} = 'aligned'
+}
+}}
 }
 \value{
 ggplot object

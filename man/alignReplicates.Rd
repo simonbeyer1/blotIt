@@ -17,8 +17,12 @@ alignReplicates(
   verbose = FALSE,
   namesFactored = TRUE,
   normalizeInput = TRUE,
+  keepOriginalScale = "none",
   outputScale = "linear",
-  iterlim = 100
+  iterlim = 100,
+  optControls = list(),
+  multistart = 1,
+  rootControls = list()
 )
 }
 \arguments{
@@ -75,13 +79,50 @@ output should be parsed as factors instead of characters.}
 scaling, helpful if convergence fails because the data varies for to many
 orders of magnitude.}
 
-\item{iterlim}{numerical argument passed to \link{trust}.}
+\item{keepOriginalScale}{character, if "none" the output will have another mean as the input, use "log" to keep same offset of log-data and "lin" to keep same mean for linear data}
 
-\item{ciProfiles}{Logical, if \code{TRUE}, the confidence intervals (CI) are
-calculated based on the profile likelihood (PL). Default is \code{FALSE}, the
-CI will then be approximated by the Fisher information (FI). Calculation via
-PL is more exact but roughly 20times slower. The FI approximates the CI
-conservatively compared to the PL (FI leads to larger CI).}
+\item{outputScale}{character, scale on which the aligned values are returned
+and plotted. "linear" (default) leaves them unchanged; other values name a
+transformation (e.g. "log") understood by \code{\link{plotIt}}.}
+
+\item{iterlim}{numerical, shorthand for
+\code{optControls = list(iterlim = ...)}.  Kept for backward
+compatibility; if \code{optControls$iterlim} is also set it takes
+precedence.}
+
+\item{optControls}{named list of control parameters passed to
+  \code{\link[trust]{trust}}.  Supported entries (with defaults):
+\describe{
+  \item{\code{rinit}}{Initial trust region radius (default \code{0.1}).}
+  \item{\code{rmax}}{Maximum trust region radius (default \code{10}).}
+  \item{\code{parscale}}{Logical or numeric vector for parameter
+    rescaling.  \code{FALSE} (default) disables rescaling; a numeric
+    vector is passed directly to \code{trust}.}
+  \item{\code{iterlim}}{Iteration limit (default \code{100}).}
+  \item{\code{fterm}}{Convergence tolerance for objective value change
+    (default \code{sqrt(.Machine$double.eps)}).}
+  \item{\code{mterm}}{Convergence tolerance for step size
+    (default \code{sqrt(.Machine$double.eps)}).}
+}
+Any entries not supplied use the defaults above.}
+
+\item{multistart}{integer, number of optimization starts.
+\code{multistart = 1} (the default) runs a single fit from the
+default initial values.  Values \eqn{> 1} run additional fits
+from randomly perturbed starting points; the result with the
+lowest objective value is kept.}
+
+\item{rootControls}{list of control parameters for the model inversion
+step (scaling to common scale). The inversion is primarily solved
+elementwise per data point using \code{\link[stats]{uniroot}} (Brent's
+method). If any points fail, \code{\link[nleqslv]{nleqslv}} is used as
+fallback. Supported entries:
+\code{searchInterval} (numeric vector of length 2, default
+\code{c(-100, 100)}) defining the initial bracket for each 1D problem.
+For the \code{nleqslv} fallback: \code{method} (\code{"Newton"} or
+\code{"Broyden"}), \code{global} (globalization strategy), and
+\code{control} (a list with e.g. \code{allowSingular}, \code{xtol},
+\code{ftol}, \code{maxit}).}
 }
 \value{
 Object of class \code{aligned}, i.e. a data frame of the
@@ -118,7 +159,7 @@ alignment result containing an attribute "outputs":
     \code{noData} containing the number of parameters and data points for
     the respected fit. This list entry also has two attributes: \code{value}
     containing the final value (residual sum of squares) passed to
-    \link{trust::trust} by the objective function and \code{df} the degrees
+    \code{\link{trust}} by the objective function and \code{df} the degrees
     of freedom of the fitting process.}
 
 \item{biological}{Names of the columns containing the biological effects}

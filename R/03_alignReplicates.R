@@ -58,13 +58,48 @@
 #' scaling, helpful if convergence fails because the data varies for to many
 #' orders of magnitude.
 #' @param keepOriginalScale character, if "none" the output will have another mean as the input, use "log" to keep same offset of log-data and "lin" to keep same mean for linear data
-#' @param iterlim numerical argument passed to \link{trust}.
+#' @param iterlim numerical, shorthand for
+#'   \code{optControls = list(iterlim = ...)}.  Kept for backward
+#'   compatibility; if \code{optControls$iterlim} is also set it takes
+#'   precedence.
 #'
-#' @param ciProfiles Logical, if \code{TRUE}, the confidence intervals (CI) are
-#' calculated based on the profile likelihood (PL). Default is \code{FALSE}, the
-#' CI will then be approximated by the Fisher information (FI). Calculation via
-#' PL is more exact but roughly 20times slower. The FI approximates the CI
-#' conservatively compared to the PL (FI leads to larger CI).
+#' @param optControls named list of control parameters passed to
+#'   \code{\link[trust]{trust}}.  Supported entries (with defaults):
+#' \describe{
+#'   \item{\code{rinit}}{Initial trust region radius (default \code{0.1}).}
+#'   \item{\code{rmax}}{Maximum trust region radius (default \code{10}).}
+#'   \item{\code{parscale}}{Logical or numeric vector for parameter
+#'     rescaling.  \code{FALSE} (default) disables rescaling; a numeric
+#'     vector is passed directly to \code{trust}.}
+#'   \item{\code{iterlim}}{Iteration limit (default \code{100}).}
+#'   \item{\code{fterm}}{Convergence tolerance for objective value change
+#'     (default \code{sqrt(.Machine$double.eps)}).}
+#'   \item{\code{mterm}}{Convergence tolerance for step size
+#'     (default \code{sqrt(.Machine$double.eps)}).}
+#' }
+#' Any entries not supplied use the defaults above.
+#'
+#' @param multistart integer, number of optimization starts.
+#'   \code{multistart = 1} (the default) runs a single fit from the
+#'   default initial values.  Values \eqn{> 1} run additional fits
+#'   from randomly perturbed starting points; the result with the
+#'   lowest objective value is kept.
+#'
+#' @param rootControls list of control parameters for the model inversion
+#' step (scaling to common scale). The inversion is primarily solved
+#' elementwise per data point using \code{\link[stats]{uniroot}} (Brent's
+#' method). If any points fail, \code{\link[nleqslv]{nleqslv}} is used as
+#' fallback. Supported entries:
+#' \code{searchInterval} (numeric vector of length 2, default
+#' \code{c(-100, 100)}) defining the initial bracket for each 1D problem.
+#' For the \code{nleqslv} fallback: \code{method} (\code{"Newton"} or
+#' \code{"Broyden"}), \code{global} (globalization strategy), and
+#' \code{control} (a list with e.g. \code{allowSingular}, \code{xtol},
+#' \code{ftol}, \code{maxit}).
+#'
+#' @param outputScale character, scale on which the aligned values are returned
+#' and plotted. "linear" (default) leaves them unchanged; other values name a
+#' transformation (e.g. "log") understood by \code{\link{plotIt}}.
 #'
 #' @details Alignment of time-course data is achieved by an alignment
 #' model which explains the observed data by a function mixing
@@ -111,7 +146,7 @@
 #'     \code{noData} containing the number of parameters and data points for
 #'     the respected fit. This list entry also has two attributes: \code{value}
 #'     containing the final value (residual sum of squares) passed to
-#'     \link{trust::trust} by the objective function and \code{df} the degrees
+#'     \code{\link{trust}} by the objective function and \code{df} the degrees
 #'     of freedom of the fitting process.}
 #'
 #' \item{biological}{Names of the columns containing the biological effects}
@@ -128,433 +163,495 @@
 #'
 #' @export
 alignReplicates <- function(data,
-                     model = NULL,
-                     errorModel = NULL,
-                     biological = NULL,
-                     scaling = NULL,
-                     error = NULL,
-                     fitLogscale = TRUE,
-                     normalize = TRUE,
-                     averageTechRep = FALSE,
-                     verbose = FALSE,
-                     namesFactored = TRUE,
-                     normalizeInput = TRUE,
-                     keepOriginalScale = "none",
-                     outputScale = "linear",
-                     iterlim = 100
-                     ) {
+                            model = NULL,
+                            errorModel = NULL,
+                            biological = NULL,
+                            scaling = NULL,
+                            error = NULL,
+                            fitLogscale = TRUE,
+                            normalize = TRUE,
+                            averageTechRep = FALSE,
+                            verbose = FALSE,
+                            namesFactored = TRUE,
+                            normalizeInput = TRUE,
+                            keepOriginalScale = "none",
+                            outputScale = "linear",
+                            iterlim = 100,
+                            optControls = list(),
+                            multistart = 1,
+                            rootControls = list()
+) {
 
-    ## check input for mistakes
-    inputCheckReport <- inputCheck(
-        data = data,
-        model = model,
-        errorModel = errorModel,
-        biological = biological,
-        scaling = scaling,
-        error = error,
-        fitLogscale = fitLogscale,
-        outputScale = outputScale
+  ## Pin BLAS to one thread for the fit, restored on exit. Multithreaded MKL can
+  ## return wrong eigen/svd results here, and single thread is faster for these
+  ## small matrices anyway. No-op without OpenMP or for OpenBLAS-pthread.
+  prevBlasThreads <- setBlasThreads(1L)
+  if (!is.na(prevBlasThreads)) {
+    on.exit(setBlasThreads(prevBlasThreads), add = TRUE)
+  }
+
+  ## ---- Build optControls with defaults -----------------------------------
+  ## Merge user-supplied optControls with defaults.
+  ## iterlim kept as standalone arg for backward compat; optControls wins.
+  optDefaults <- list(
+    rinit    = 0.1,
+    rmax     = 10,
+    parscale = FALSE,
+    iterlim  = iterlim,
+    fterm    = sqrt(.Machine$double.eps),
+    mterm    = sqrt(.Machine$double.eps)
+  )
+  optControls <- modifyList(optDefaults, optControls)
+
+  ## ---- Validate multistart -----------------------------------------------
+  multistart <- as.integer(max(multistart, 1L))
+
+  ## check input for mistakes
+  inputCheckReport <- inputCheck(
+    data = data,
+    model = model,
+    errorModel = errorModel,
+    biological = biological,
+    scaling = scaling,
+    error = error,
+    fitLogscale = fitLogscale,
+    outputScale = outputScale
+  )
+
+  if (verbose) {
+    cat(inputCheckReport, "\n")
+  }
+
+  ## Check if data is already blotIt output
+  parameterData <- NULL
+
+  if (inherits(data, "aligned")) {
+    parameterData <- data$parameters
+    data <- data$original
+  }
+
+  ## read biological, scaling and error effects from input
+  effects <- identifyEffects(
+    biological = biological,
+    scaling = scaling,
+    error = error
+  )
+
+  effectsValues <- effects$effectsValues
+  effectsPars <- effects$effectsPars
+
+  ## prepare data
+  data <- as.data.frame(data)
+
+  toBeScaled <- splitForScaling(
+    data,
+    effectsValues,
+    normalizeInput
+  )
+
+  ## Generate unique list of targets
+  targets <- make.unique(
+    vapply(toBeScaled, function(d) as.character(d$name)[1], ""),
+    sep = "_"
+  )
+
+  ## Rename names to unique if multiple scalings per target exist
+  for (n in seq_along(targets)) {
+    toBeScaled[[n]]$name <- targets[n]
+  }
+
+  ## Get biological, scaling and error parameter from model and error model
+  parameters <- getSymbols(c(model, errorModel), exclude = colnames(data))
+
+  ## Include the normalization term as a constraint if said so in the function
+  ## call
+  if (normalize) {
+    constraint <- paste("1e3 * (mean(", effectsPars[1][1], ") - 1)")
+    constStrength <- 1000
+  } else {
+    constraint <- "0"
+    constStrength <- 0
+  }
+
+  ## Retrieve the covariates as the "remaining" model parameters, when fixed,
+  ## latent and errorparameters are excluded
+  covariates <- union(
+    getSymbols(
+      model,
+      exclude = c(effectsPars[[1]], effectsPars[[2]], effectsPars[[3]])
+    ),
+    getSymbols(
+      errorModel,
+      exclude = c(effectsPars[[1]], effectsPars[[2]], effectsPars[[3]])
     )
+  )
+  cat("Covariates:", paste(covariates, sep = ", "), "\n")
 
-    if (verbose) {
-        cat(inputCheckReport, "\n")
-    }
-
-    ## Check if data is already blotIt output
-    parameterData <- NULL
-
-    if (inherits(data, "aligned")) {
-        parameterData <- data$parameters
-        data <- data$original
-    }
-
-    ## read biological, scaling and error effects from input
-    effects <- identifyEffects(
-        biological = biological,
-        scaling = scaling,
-        error = error
-    )
-
-    effectsValues <- effects$effectsValues
-    effectsPars <- effects$effectsPars
-
-    ## prepare data
-    data <- as.data.frame(data)
-
-    toBeScaled <- splitForScaling(
-        data,
-        effectsValues,
-        normalizeInput
-    )
-
-    ## Generate unique list of targets
-    targets <- make.unique(
-        vapply(toBeScaled, function(d) as.character(d$name)[1], ""),
-        sep = "_"
-    )
-
-    ## Rename names to unique if multiple scalings per target exist
-    for (n in seq_along(targets)) {
-        toBeScaled[[n]]$name <- targets[n]
-    }
-
-    ## Get biological, scaling and error parameter from model and error model
-    parameters <- getSymbols(c(model, errorModel), exclude = colnames(data))
-
-    ## Include the normalization term as a constraint if said so in the function
-    ## call
-    if (normalize) {
-        constraint <- paste("1e3 * (mean(", effectsPars[1][1], ") - 1)")
-        constStrength <- 1000
-    } else {
-        constraint <- "0"
-        constStrength <- 0
-    }
-
-    ## Retrieve the covariates as the "remaining" model parameters, when fixed,
-    ## latent and errorparameters are excluded
-    covariates <- union(
-        getSymbols(
-            model,
-            exclude = c(effectsPars[[1]], effectsPars[[2]], effectsPars[[3]])
+  ## Check if parameters from (error-) model and passed expressions coincide
+  if (
+    length(
+      setdiff(
+        c(
+          effectsPars[[1]],
+          effectsPars[[2]],
+          effectsPars[[3]]
         ),
-        getSymbols(
-            errorModel,
-            exclude = c(effectsPars[[1]], effectsPars[[2]], effectsPars[[3]])
-        )
-    )
-    cat("Covariates:", paste(covariates, sep = ", "), "\n")
-
-    ## Check if parameters from (error-) model and passed expressions coincide
-    if (
-        length(
-            setdiff(
-                c(
-                    effectsPars[[1]],
-                    effectsPars[[2]],
-                    effectsPars[[3]]
-                ),
-                parameters
-            )
-        ) > 0
-    ) {
-        stop("Not all paramters are defined in either arguments
+        parameters
+      )
+    ) > 0
+  ) {
+    stop("Not all paramters are defined in either arguments
          'scaling', 'biological' or 'error'")
+  }
+
+  ## Name the respective parameters fixed, latent and error
+  names(parameters)[parameters %in% effectsPars[[1]]] <- "biological"
+  names(parameters)[parameters %in% effectsPars[[2]]] <- "scaling"
+  names(parameters)[parameters %in% effectsPars[[3]]] <- "error"
+
+  ## --- Attempt symbolic (analytical) inversion via SymPy -----------------
+  ## This is done BEFORE log-scale and bracket substitutions so that
+
+  ## symbolicInverse() works on the clean, user-supplied model string.
+  symbolicResult <- symbolicInverse(
+    model = model,
+    bioPar = effectsPars[[1]][1],
+    allSymbols = parameters,
+    verbose = verbose
+  )
+
+  ## Apply the same transformations (logscale, brackets) as the forward model,
+  ## done below after those transforms are defined. Store the raw result and
+  ## process it afterwards.
+
+  ## parse error model by replacing the "value" by the model
+  errorModel <- replaceSymbols(
+    "value",
+    paste0("(", model, ")"),
+    errorModel
+  )
+
+  ## Apply transformation according to given 'fitLogscale' parameter
+  if (fitLogscale == TRUE) {
+    model <- replaceSymbols(parameters, paste0(
+      "exp(", parameters,
+      ")"
+    ), model)
+    errorModel <- replaceSymbols(parameters, paste0(
+      "exp(",
+      parameters, ")"
+    ), errorModel)
+    constraint <- replaceSymbols(parameters, paste0(
+      "exp(",
+      parameters, ")"
+    ), constraint)
+    if (verbose) {
+      cat("model, errormodel and constraint are scaled: x <- exp(x)\n")
     }
+  } else if (verbose == TRUE) {
+    cat("model, errormodel and constraint remain linear scaled.\n")
+  }
 
-    ## Name the respective parameters fixed, latent and error
-    names(parameters)[parameters %in% effectsPars[[1]]] <- "biological"
-    names(parameters)[parameters %in% effectsPars[[2]]] <- "scaling"
-    names(parameters)[parameters %in% effectsPars[[3]]] <- "error"
 
-    ## parse error model by replacing the "value" by the model
-    errorModel <- replaceSymbols(
-        "value",
-        paste0("(", model, ")"),
-        errorModel
-    )
+  ## Calculating the derivative
+  modelDeriv <- deparse(
+    stats::D(parse(text = model), name = effectsPars[[1]][1])
+  )
 
-    ## Apply transformation according to given 'fitLogscale' parameter
-    if (fitLogscale == TRUE) {
-        model <- replaceSymbols(parameters, paste0(
-            "exp(", parameters,
-            ")"
-        ), model)
-        errorModel <- replaceSymbols(parameters, paste0(
-            "exp(",
-            parameters, ")"
-        ), errorModel)
-        constraint <- replaceSymbols(parameters, paste0(
-            "exp(",
-            parameters, ")"
-        ), constraint)
-        if (verbose) {
-            cat("model, errormodel and constraint are scaled: x <- exp(x)\n")
-        }
-    } else if (verbose == TRUE) {
-        cat("model, errormodel and constraint remain linear scaled.\n")
+  ## Calculating the (error) model jacobian
+  modelJacobian <- lapply(
+    parameters,
+    function(p) {
+      deparse(stats::D(parse(text = model), name = p))
     }
-
-
-    ## Calculating the derivative
-    modelDeriv <- deparse(
-        stats::D(parse(text = model), name = effectsPars[[1]][1])
-    )
-
-    ## Calculating the (error) model jacobian
-    modelJacobian <- lapply(
-        parameters,
-        function(p) {
-            deparse(stats::D(parse(text = model), name = p))
-        }
-    )
-    errorModelJacobian <- lapply(
-        parameters,
-        function(p) {
-            deparse(stats::D(parse(text = errorModel), name = p))
-        }
-    )
-
-    ## Construct math function expressions
-    constrExpr <- parse(text = constraint)
-
-    ## Replace the parameters used in the (error) model and the derivatives
-    ## by placeholders of the respective effect category
-    for (n in seq_along(parameters)) {
-        model <- replaceSymbols(parameters[n], paste0(
-            parameters[n],
-            "[", names(parameters)[n], "]"
-        ), model)
-        errorModel <- replaceSymbols(parameters[n], paste0(
-            parameters[n],
-            "[", names(parameters)[n], "]"
-        ), errorModel)
-        modelDeriv <- replaceSymbols(parameters[n], paste0(
-            parameters[n],
-            "[", names(parameters)[n], "]"
-        ), modelDeriv)
-        modelJacobian <- lapply(modelJacobian, function(myjac) {
-            replaceSymbols(
-                parameters[n],
-                paste0(
-                    parameters[n], "[", names(parameters)[n],
-                    "]"
-                ), myjac
-            )
-        })
-        errorModelJacobian <- lapply(errorModelJacobian, function(myjac) {
-            replaceSymbols(
-                parameters[n],
-                paste0(
-                    parameters[n], "[", names(parameters)[n],
-                    "]"
-                ), myjac
-            )
-        })
+  )
+  errorModelJacobian <- lapply(
+    parameters,
+    function(p) {
+      deparse(stats::D(parse(text = errorModel), name = p))
     }
+  )
 
-    cat("Model:        ", model, "\n", sep = "")
-    cat("Error Model:  ", errorModel, "\n", sep = "")
+  ## Construct math function expressions
+  constrExpr <- parse(text = constraint)
 
-    ## Parse functions to an executable expression
-    modelExpr <- parse(text = model)
-    modelDerivExpr <- parse(text = modelDeriv)
-    errorModelExpr <- parse(text = errorModel)
+  ## Replace the parameters used in the (error) model and the derivatives
+  ## by placeholders of the respective effect category
+  for (n in seq_along(parameters)) {
+    model <- replaceSymbols(parameters[n], paste0(
+      parameters[n],
+      "[", names(parameters)[n], "]"
+    ), model)
+    errorModel <- replaceSymbols(parameters[n], paste0(
+      parameters[n],
+      "[", names(parameters)[n], "]"
+    ), errorModel)
+    modelDeriv <- replaceSymbols(parameters[n], paste0(
+      parameters[n],
+      "[", names(parameters)[n], "]"
+    ), modelDeriv)
+    modelJacobian <- lapply(modelJacobian, function(myjac) {
+      replaceSymbols(
+        parameters[n],
+        paste0(
+          parameters[n], "[", names(parameters)[n],
+          "]"
+        ), myjac
+      )
+    })
+    errorModelJacobian <- lapply(errorModelJacobian, function(myjac) {
+      replaceSymbols(
+        parameters[n],
+        paste0(
+          parameters[n], "[", names(parameters)[n],
+          "]"
+        ), myjac
+      )
+    })
+  }
 
-    modelJacobianExpr <- lapply(
-        modelJacobian,
-        function(myjac) parse(text = myjac)
+  cat("Model:        ", model, "\n", sep = "")
+  cat("Error Model:  ", errorModel, "\n", sep = "")
+
+  ## Parse functions to an executable expression
+  modelExpr <- parse(text = model)
+  modelDerivExpr <- parse(text = modelDeriv)
+  errorModelExpr <- parse(text = errorModel)
+
+  modelJacobianExpr <- lapply(
+    modelJacobian,
+    function(myjac) parse(text = myjac)
+  )
+  errorModelJacobianExpr <- lapply(
+    errorModelJacobian,
+    function(myjac) parse(text = myjac)
+  )
+
+  ## --- Prepare the analytical inverse expressions ------------------------
+  ## Apply the same logscale + bracket transforms that were applied to
+
+  ## the forward model above.
+  analyticInverse <- prepareAnalyticInverse(
+    symbolicResult = symbolicResult,
+    parameters = parameters,
+    fitLogscale = fitLogscale
+  )
+
+  if (!is.null(analyticInverse)) {
+    cat("Analytic inverse:       ", analyticInverse$inverseStr, "\n")
+    cat("Analytic inverse deriv: ", analyticInverse$inverseDerivStr, "\n")
+  } else {
+    cat("Analytic inverse: not available, using numerical fallback.\n")
+  }
+
+  passParList <- list(
+    effectsValues = effectsValues,
+    parameterData = parameterData,
+    averageTechRep = averageTechRep,
+    verbose = verbose,
+    covariates = covariates,
+    parameters = parameters,
+    fitLogscale = fitLogscale,
+    effectsPars = effectsPars,
+    modelExpr = modelExpr,
+    errorModelExpr = errorModelExpr,
+    constrExpr = constrExpr,
+    modelJacobianExpr = modelJacobianExpr,
+    errorModelJacobianExpr = errorModelJacobianExpr,
+    constStrength = constStrength,
+    normalize = normalize,
+    modelDerivExpr = modelDerivExpr,
+    outputScale = outputScale,
+    optControls = optControls,
+    multistart = multistart,
+    rootControls = rootControls,
+    analyticInverseExpr = if (!is.null(analyticInverse)) analyticInverse$inverseExpr else NULL,
+    analyticInverseDerivExpr = if (!is.null(analyticInverse)) analyticInverse$inverseDerivExpr else NULL
+  )
+
+  # * Hand over to scaling --------------------------------------------------
+  out <- lapply(
+    seq_along(toBeScaled),
+    function(i,
+             passParList) {
+      try({
+        cat(
+          "Target ", i, "/", length(toBeScaled), ":",
+          targets[i], "\n", sep = ""
+        )
+        out <- scaleTarget(
+          currentData = toBeScaled[[i]],
+          passParList = passParList
+        )
+
+        return(out)
+      },
+      silent = FALSE
+      )
+    },
+    ## additional parameters for scaleTarget
+    passParList = passParList
+  )
+
+  ## Sanitize results from failed fits
+  ## rbind parameter table from not-failed elements of out
+  parTable <- do.call(
+    rbind,
+    lapply(
+      out,
+      function(o) {
+        if (!inherits(o, "try-error")) {
+          o[[6]]
+        } else {
+          NULL
+        }
+      }
     )
-    errorModelJacobianExpr <- lapply(
-        errorModelJacobian,
-        function(myjac) parse(text = myjac)
+  )
+
+  ## add up the "values", i.e. the -2*LL
+  attr(parTable, "value") <- do.call(
+    sum,
+    lapply(
+      out,
+      function(o) {
+        if (!inherits(o, "try-error")) {
+          attr(o[[6]], "value")
+        } else {
+          0
+        }
+      }
     )
+  )
 
-
-    passParList <- list(
-        effectsValues = effectsValues,
-        parameterData = parameterData,
-        averageTechRep = averageTechRep,
-        verbose = verbose,
-        covariates = covariates,
-        parameters = parameters,
-        fitLogscale = fitLogscale,
-        effectsPars = effectsPars,
-        modelExpr = modelExpr,
-        errorModelExpr = errorModelExpr,
-        constrExpr = constrExpr,
-        modelJacobianExpr = modelJacobianExpr,
-        errorModelJacobianExpr = errorModelJacobianExpr,
-        constStrength = constStrength,
-        normalize = normalize,
-        modelDerivExpr = modelDerivExpr,
-        outputScale = outputScale,
-        iterlim = iterlim
+  ## add up degrees of freedom
+  attr(parTable, "df") <- do.call(
+    sum,
+    lapply(
+      out,
+      function(o) {
+        if (!inherits(o, "try-error")) {
+          attr(o[[6]], "df")
+        } else {
+          0
+        }
+      }
     )
+  )
 
-# * Hand over to scaling --------------------------------------------------
-    out <- lapply(
-        seq_along(toBeScaled),
-        function(i,
-                 passParList) {
-            try({
-                cat(
-                    "Target ", i, "/", length(toBeScaled), ":",
-                    targets[i], "\n", sep = ""
-                    )
-                out <- scaleTarget(
-                    currentData = toBeScaled[[i]],
-                    passParList = passParList
-                )
-
-                return(out)
-            },
-            silent = FALSE
-            )
-        },
-        ## additional parameters for scaleTarget
-        passParList = passParList
-    )
-
-    ## Sanitize results from failed fits
-    ## rbind parameter table from not-failed elements of out
-    parTable <- do.call(
+  ## paste together the other results
+  outCombined <- lapply(
+    seq_len(5),
+    function(i) {
+      do.call(
         rbind,
         lapply(
-            out,
-            function(o) {
-                if (!inherits(o, "try-error")) {
-                    o[[6]]
-                } else {
-                    NULL
-                }
+          out,
+          function(o) {
+            if (!inherits(o, "try-error")) {
+              o[[i]]
+            } else {
+              NULL
             }
+          }
         )
-    )
-
-    ## add up the "values", i.e. the -2*LL
-    attr(parTable, "value") <- do.call(
-        sum,
-        lapply(
-            out,
-            function(o) {
-                if (!inherits(o, "try-error")) {
-                    attr(o[[6]], "value")
-                } else {
-                    0
-                }
-            }
-        )
-    )
-
-    ## add up degrees of freedom
-    attr(parTable, "df") <- do.call(
-        sum,
-        lapply(
-            out,
-            function(o) {
-                if (!inherits(o, "try-error")) {
-                    attr(o[[6]], "df")
-                } else {
-                    0
-                }
-            }
-        )
-    )
-
-    ## paste together the other results
-    outCombined <- lapply(
-        seq_len(5),
-        function(i) {
-            do.call(
-                rbind,
-                lapply(
-                    out,
-                    function(o) {
-                        if (!inherits(o, "try-error")) {
-                            o[[i]]
-                        } else {
-                            NULL
-                        }
-                    }
-                )
-            )
-        }
-    )
-
-    names(outCombined) <- c(
-        "prediction",
-        "scaled",
-        "aligned",
-        "original",
-        "originalWithParameters"
-    )
-
-    if(keepOriginalScale!="none"){
-        if(normalizeInput) warning("To keep the original scale, use normalizeInput = FALSE")
-        if(keepOriginalScale=="lin"){
-            for(target in unique(outCombined$original$name)){
-                meanOriginal <- mean(subset(outCombined$original, name==target)$value)
-                meanScaled <- mean(subset(outCombined$scaled, name==target)$value)
-                meanAligned <- mean(subset(outCombined$aligned, name==target)$value)
-                meanPrediction <- mean(subset(outCombined$prediction, name==target)$value)
-
-                outCombined$scaled$value[which(outCombined$scaled$name==target)] <- outCombined$scaled$value[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-                outCombined$scaled$sigma[which(outCombined$scaled$name==target)] <- outCombined$scaled$sigma[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-                outCombined$scaled$lower[which(outCombined$scaled$name==target)] <- outCombined$scaled$lower[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-                outCombined$scaled$upper[which(outCombined$scaled$name==target)] <- outCombined$scaled$upper[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-
-                outCombined$aligned$value[which(outCombined$aligned$name==target)] <- outCombined$aligned$value[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-                outCombined$aligned$sigma[which(outCombined$aligned$name==target)] <- outCombined$aligned$sigma[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-                outCombined$aligned$lower[which(outCombined$aligned$name==target)] <- outCombined$aligned$lower[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-                outCombined$aligned$upper[which(outCombined$aligned$name==target)] <- outCombined$aligned$upper[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-
-                outCombined$prediction$value[which(outCombined$prediction$name==target)] <- outCombined$prediction$value[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-                outCombined$prediction$sigma[which(outCombined$prediction$name==target)] <- outCombined$prediction$sigma[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-                outCombined$prediction$lower[which(outCombined$prediction$name==target)] <- outCombined$prediction$lower[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-                outCombined$prediction$upper[which(outCombined$prediction$name==target)] <- outCombined$prediction$upper[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-            }
-        }
-        if(keepOriginalScale=="log"){
-                for(target in unique(outCombined$original$name)){
-                    meanOriginal <- mean(subset(outCombined$original, name==target)$value)
-                    meanScaled <- mean(subset(outCombined$scaled, name==target)$value)
-                    meanAligned <- mean(subset(outCombined$aligned, name==target)$value)
-                    meanPrediction <- mean(subset(outCombined$prediction, name==target)$value)
-
-                    outCombined$scaled$value[which(outCombined$scaled$name==target)] <- outCombined$scaled$value[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-                    #outCombined$scaled$sigma[which(outCombined$scaled$name==target)] <- outCombined$scaled$sigma[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-                    outCombined$scaled$lower[which(outCombined$scaled$name==target)] <- outCombined$scaled$lower[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-                    outCombined$scaled$upper[which(outCombined$scaled$name==target)] <- outCombined$scaled$upper[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-
-                    outCombined$aligned$value[which(outCombined$aligned$name==target)] <- outCombined$aligned$value[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-                    #outCombined$aligned$sigma[which(outCombined$aligned$name==target)] <- outCombined$aligned$sigma[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-                    outCombined$aligned$lower[which(outCombined$aligned$name==target)] <- outCombined$aligned$lower[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-                    outCombined$aligned$upper[which(outCombined$aligned$name==target)] <- outCombined$aligned$upper[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-
-                    outCombined$prediction$value[which(outCombined$prediction$name==target)] <- outCombined$prediction$value[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-                    #outCombined$prediction$sigma[which(outCombined$prediction$name==target)] <- outCombined$prediction$sigma[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-                    outCombined$prediction$lower[which(outCombined$prediction$name==target)] <- outCombined$prediction$lower[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-                    outCombined$prediction$upper[which(outCombined$prediction$name==target)] <- outCombined$prediction$upper[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-                }
-        }
+      )
     }
+  )
 
-    returnList <- list(
-        aligned = outCombined$aligned,
-        scaled = outCombined$scaled,
-        prediction = outCombined$prediction,
-        original = outCombined$original,
-        originalWithParameters = outCombined$originalWithParameters,
-        parameter = parTable,
-        biological = effectsValues[[1]],
-        scaling = effectsValues[[2]],
-        error = effectsValues[[3]],
-        outputScale = outputScale
-    )
+  names(outCombined) <- c(
+    "prediction",
+    "scaled",
+    "aligned",
+    "original",
+    "originalWithParameters"
+  )
 
-    if (namesFactored == TRUE) {
-        returnList$aligned$name <- factor(
-            returnList$aligned$name,
-            levels = unique(returnList$aligned$name)
-        )
-        returnList$scaled$name <- factor(
-            returnList$scaled$name,
-            levels = unique(returnList$scaled$name)
-        )
-        returnList$prediction$name <- factor(
-            returnList$prediction$name,
-            levels = unique(returnList$prediction$name)
-        )
-        returnList$original$name <- factor(
-            returnList$original$name,
-            levels = unique(returnList$original$name)
-        )
-        returnList$originalWithParameters$name <- factor(
-            returnList$originalWithParameters$name,
-            levels = unique(returnList$originalWithParameters$name)
-        )
+  if(keepOriginalScale!="none"){
+    if(normalizeInput) warning("To keep the original scale, use normalizeInput = FALSE")
+    if(keepOriginalScale=="lin"){
+      for(target in unique(outCombined$original$name)){
+        meanOriginal <- mean(subset(outCombined$original, name==target)$value)
+        meanScaled <- mean(subset(outCombined$scaled, name==target)$value)
+        meanAligned <- mean(subset(outCombined$aligned, name==target)$value)
+        meanPrediction <- mean(subset(outCombined$prediction, name==target)$value)
+
+        outCombined$scaled$value[which(outCombined$scaled$name==target)] <- outCombined$scaled$value[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
+        outCombined$scaled$sigma[which(outCombined$scaled$name==target)] <- outCombined$scaled$sigma[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
+        outCombined$scaled$lower[which(outCombined$scaled$name==target)] <- outCombined$scaled$lower[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
+        outCombined$scaled$upper[which(outCombined$scaled$name==target)] <- outCombined$scaled$upper[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
+
+        outCombined$aligned$value[which(outCombined$aligned$name==target)] <- outCombined$aligned$value[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
+        outCombined$aligned$sigma[which(outCombined$aligned$name==target)] <- outCombined$aligned$sigma[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
+        outCombined$aligned$lower[which(outCombined$aligned$name==target)] <- outCombined$aligned$lower[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
+        outCombined$aligned$upper[which(outCombined$aligned$name==target)] <- outCombined$aligned$upper[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
+
+        outCombined$prediction$value[which(outCombined$prediction$name==target)] <- outCombined$prediction$value[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
+        outCombined$prediction$sigma[which(outCombined$prediction$name==target)] <- outCombined$prediction$sigma[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
+        outCombined$prediction$lower[which(outCombined$prediction$name==target)] <- outCombined$prediction$lower[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
+        outCombined$prediction$upper[which(outCombined$prediction$name==target)] <- outCombined$prediction$upper[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
+      }
     }
+    if(keepOriginalScale=="log"){
+      for(target in unique(outCombined$original$name)){
+        meanOriginal <- mean(subset(outCombined$original, name==target)$value)
+        meanScaled <- mean(subset(outCombined$scaled, name==target)$value)
+        meanAligned <- mean(subset(outCombined$aligned, name==target)$value)
+        meanPrediction <- mean(subset(outCombined$prediction, name==target)$value)
 
-    return(returnList)
+        outCombined$scaled$value[which(outCombined$scaled$name==target)] <- outCombined$scaled$value[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
+        #outCombined$scaled$sigma[which(outCombined$scaled$name==target)] <- outCombined$scaled$sigma[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
+        outCombined$scaled$lower[which(outCombined$scaled$name==target)] <- outCombined$scaled$lower[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
+        outCombined$scaled$upper[which(outCombined$scaled$name==target)] <- outCombined$scaled$upper[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
+
+        outCombined$aligned$value[which(outCombined$aligned$name==target)] <- outCombined$aligned$value[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
+        #outCombined$aligned$sigma[which(outCombined$aligned$name==target)] <- outCombined$aligned$sigma[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
+        outCombined$aligned$lower[which(outCombined$aligned$name==target)] <- outCombined$aligned$lower[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
+        outCombined$aligned$upper[which(outCombined$aligned$name==target)] <- outCombined$aligned$upper[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
+
+        outCombined$prediction$value[which(outCombined$prediction$name==target)] <- outCombined$prediction$value[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
+        #outCombined$prediction$sigma[which(outCombined$prediction$name==target)] <- outCombined$prediction$sigma[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
+        outCombined$prediction$lower[which(outCombined$prediction$name==target)] <- outCombined$prediction$lower[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
+        outCombined$prediction$upper[which(outCombined$prediction$name==target)] <- outCombined$prediction$upper[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
+      }
+    }
+  }
+
+  returnList <- list(
+    aligned = outCombined$aligned,
+    scaled = outCombined$scaled,
+    prediction = outCombined$prediction,
+    original = outCombined$original,
+    originalWithParameters = outCombined$originalWithParameters,
+    parameter = parTable,
+    biological = effectsValues[[1]],
+    scaling = effectsValues[[2]],
+    error = effectsValues[[3]],
+    outputScale = outputScale
+  )
+
+  if (namesFactored == TRUE) {
+    returnList$aligned$name <- factor(
+      returnList$aligned$name,
+      levels = unique(returnList$aligned$name)
+    )
+    returnList$scaled$name <- factor(
+      returnList$scaled$name,
+      levels = unique(returnList$scaled$name)
+    )
+    returnList$prediction$name <- factor(
+      returnList$prediction$name,
+      levels = unique(returnList$prediction$name)
+    )
+    returnList$original$name <- factor(
+      returnList$original$name,
+      levels = unique(returnList$original$name)
+    )
+    returnList$originalWithParameters$name <- factor(
+      returnList$originalWithParameters$name,
+      levels = unique(returnList$originalWithParameters$name)
+    )
+  }
+
+  return(returnList)
 }

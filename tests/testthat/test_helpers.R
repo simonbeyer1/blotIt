@@ -26,7 +26,7 @@ test_that("splitForScaling()", {
 
     effectsValues <- list(
         biologicaValues = c("name", "time", "condition"),
-        scalingValues = c("name", "ID"),
+        scalingValues = c("name", "experiment"),
         errorValues = "name"
     )
 
@@ -38,7 +38,7 @@ test_that("splitForScaling()", {
 
     effectsValues_2 <- list(
         biologicaValues = c("name", "time", "condition"),
-        scalingValues = c("ID"),
+        scalingValues = c("experiment"),
         errorValues = "name"
     )
 
@@ -50,7 +50,7 @@ test_that("splitForScaling()", {
                 normalizeInput = TRUE
             )
         ),
-        14
+        2
     )
 
     expect_equal(
@@ -154,7 +154,7 @@ test_that("inputCheck()", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             biological = yi ~ name + time + condition,
-            scaling = sj ~ name + ID,
+            scaling = sj ~ name + experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = TRUE
         ),
@@ -167,7 +167,7 @@ test_that("inputCheck()", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             biological = yi ~ name + time + condition + wrong,
-            scaling = sj ~ name + ID,
+            scaling = sj ~ name + experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = TRUE
         ),
@@ -183,7 +183,7 @@ test_that("inputCheck()", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             # biological = "yi ~ name + time + condition",
-            scaling = sj ~ name + ID,
+            scaling = sj ~ name + experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = TRUE
         ),
@@ -196,7 +196,7 @@ test_that("inputCheck()", {
             # model = "yi / sj",
             errorModel = "value * sigmaR",
             # biological = "yi ~ name + time + condition",
-            scaling = sj ~ name + ID,
+            scaling = sj ~ name + experiment,
             # error = sigmaR ~ name + 1,
             fitLogscale = TRUE
         ),
@@ -209,7 +209,7 @@ test_that("inputCheck()", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             biological = "yi ~ name + time + condition",
-            scaling = sj ~ name + ID,
+            scaling = sj ~ name + experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = "wrong"
         ),
@@ -548,7 +548,7 @@ test_that("objFunction()", {
             passParList2 = test_passParList2,
             calcDeriv = TRUE
         )$value,
-        0.12445657
+        9.282295656
     )
 
 
@@ -589,21 +589,29 @@ test_that("splitForScaling()", {
 
     test_effect_values <- list(
         biologicaValues = c("name", "time", "condition"),
-        scalingValues = c("name", "ID"),
+        scalingValues = c("name", "experiment"),
         errorValues = c("name")
     )
 
     expected_values <- c(
-      116.83827140,
-      138.80850037,
-      99.09067869,
-      106.68583790,
-      115.02805006,
-      111.91323007,
-      132.56618485,
-      94.46701749,
-      122.44084967,
-      51.58390606
+      80.36053372,
+      92.40275199,
+      62.32123483,
+      85.09419171,
+      65.61045633,
+      85.72200280,
+      1418.52767519,
+      1387.00986481,
+      1122.71825505,
+      674.72530337,
+      22.32436924,
+      26.77987791,
+      23.63110796,
+      30.52405367,
+      28.64531819,
+      14.73505324,
+      8.92552194,
+      3.09092685
     )
 
     expect_equal(

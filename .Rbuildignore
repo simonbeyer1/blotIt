@@ -1,2 +1,10 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.positai$
+^\.claude$
+^\.github$
+^\.Rhistory$
+^CLAUDE\.md$
+^Readme\.md$
+^blotIt\.Rcheck$
+^blotIt_.*\.tar\.gz$

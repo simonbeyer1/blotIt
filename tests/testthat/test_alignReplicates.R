@@ -14,7 +14,7 @@ test_that("alignReplicates() - model parsing", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             biological = "one_parameter",
-            scaling = sj ~ name + ID,
+            scaling = sj ~ name + experiment,
             error = sigmaR ~ name + 1
         ),
         "Do not pass biological, scaling or error as string."
@@ -46,7 +46,7 @@ test_that("alignReplicates() - model parsing", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             biological = yi ~ condition,
-            scaling = wrong ~ ID,
+            scaling = wrong ~ experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = TRUE
         ),
@@ -60,7 +60,7 @@ test_that("alignReplicates() - model parsing", {
             model = "yi / sj",
             errorModel = "value * sigmaR",
             biological = yi ~ condition,
-            scaling = sj ~ ID,
+            scaling = sj ~ experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = "string"
         ),

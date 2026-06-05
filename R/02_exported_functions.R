@@ -100,17 +100,17 @@ readWide <- function(file, description = NULL, time = 1, header = TRUE, ...) {
 #' @param spline Logical, if set to \code{TRUE}, what is specified as
 #' \code{plotLine} will be plotted as a smooth spline instead of straight lines
 #' between points.
-#' @param scales String passed as \code{scales} argument to \link{facet_wrap}.
+#' @param scales String passed as \code{scales} argument to \link[ggplot2]{facet_wrap}.
 #'
 #' @param alignZeros Logical, if \code{TRUE}, the zero ticks are aligned
 #' between the facets.
 #' @param plotCaption Logical, if \code{TRUE}, a caption describing the plotted
 #' data is added to the plot.
 #' @param ncol Numerical passed as \code{ncol} argument to
-#' \link{facet_wrap}.
+#' \link[ggplot2]{facet_wrap}.
 #'
 #' @param useColors vector of custom color values as taken by the \code{values}
-#' argument in the \link{scale_color_manual} method for \code{ggplot} objects.
+#' argument in the \link[ggplot2]{scale_color_manual} method for \code{ggplot} objects.
 #'
 # @param duplicateZeroPoints Logical, if set to \code{TRUE} all zero time
 # points are assumed to belong to the first condition. E.g. when the different
@@ -128,17 +128,17 @@ readWide <- function(file, description = NULL, time = 1, header = TRUE, ...) {
 #' @param doseValueName name of the column that should be used for the x axis in
 #' case of a dose response plot. The default is 'dose'
 #'
-#' @param labelX Optional, value passed to \code{xlab} parameter of \link{ggplot}
+#' @param labelX Optional, value passed to \code{xlab} parameter of \link[ggplot2]{ggplot}
 #' for the x-axis. Default is \code{NULL} leading to 'Time' or 'Dose',
 #' respectively.
 #'
-#' @param labelY Optional, value passed to \code{ylab} parameter of \link{ggplot}
+#' @param labelY Optional, value passed to \code{ylab} parameter of \link[ggplot2]{ggplot}
 #' for the y-axis. Default is \code{NULL} leading to 'Signal'.
 #'
 #' @param ... Logical expression used for subsetting the data frames, e.g.
 #' \code{name == "pERK1" & time < 60}.
 #'
-#' @FacetLabels String, either 'simple' or 'full'. Results in the value of
+#' @param FacetLabels String, either 'simple' or 'full'. Results in the value of
 #' the facets being printed either separated by underscores ('simple') or
 #' with the respective facet names ('full')
 #'
@@ -252,79 +252,79 @@ plotIt <- function(
   }
   # * FacetLabels ----
   if(FacetLabels == "simple"){
-  # * * FacetLabels - simple ----
-  plotList$aligned$biological <- do.call(
-    paste,
-    c(
-      plotList$aligned[
-        ,
-        biological[!(biological %in% c("name", xValue))],
-        drop = FALSE
-      ],
-      list(sep="_")
+    # * * FacetLabels - simple ----
+    plotList$aligned$biological <- do.call(
+      paste,
+      c(
+        plotList$aligned[
+          ,
+          biological[!(biological %in% c("name", xValue))],
+          drop = FALSE
+        ],
+        list(sep="_")
+      )
     )
-  )
-  plotList$aligned$scaling <- NA
+    plotList$aligned$scaling <- NA
 
-  ## scaled
-  plotList$scaled$biological <- do.call(
-    paste,
-    c(
-      inputList$scaled[
-        ,
-        biological[!(biological %in% c("name", xValue))],
-        drop = FALSE
-      ],
-      list(sep="_")
+    ## scaled
+    plotList$scaled$biological <- do.call(
+      paste,
+      c(
+        inputList$scaled[
+          ,
+          biological[!(biological %in% c("name", xValue))],
+          drop = FALSE
+        ],
+        list(sep="_")
+      )
     )
-  )
-  plotList$scaled$scaling <- do.call(
-    paste,
-    c(
-      inputList$scaled[, scaling[scaling != "name"], drop = FALSE],
-      list(sep="_")
+    plotList$scaled$scaling <- do.call(
+      paste,
+      c(
+        inputList$scaled[, scaling[scaling != "name"], drop = FALSE],
+        list(sep="_")
+      )
     )
-  )
 
-  ## prediction
-  plotList$prediction$biological <- do.call(
-    paste,
-    c(
-      inputList$prediction[
-        ,
-        biological[!(biological %in% c("name", xValue))],
-        drop = FALSE
-      ],
-      list(sep="_")
+    ## prediction
+    plotList$prediction$biological <- do.call(
+      paste,
+      c(
+        inputList$prediction[
+          ,
+          biological[!(biological %in% c("name", xValue))],
+          drop = FALSE
+        ],
+        list(sep="_")
+      )
     )
-  )
-  plotList$prediction$scaling <- do.call(
-    paste,
-    c(
-      inputList$prediction[, scaling[scaling != "name"], drop = FALSE],
-      list(sep="_")
+    plotList$prediction$scaling <- do.call(
+      paste,
+      c(
+        inputList$prediction[, scaling[scaling != "name"], drop = FALSE],
+        list(sep="_")
+      )
     )
-  )
 
-  ## original
-  plotList$original$biological <- do.call(
-    paste,
-    c(
-      inputList$original[
-        ,
-        biological[!(biological %in% c("name", xValue))],
-        drop = FALSE
-      ],
-      list(sep="_")
+    ## original
+    plotList$original$biological <- do.call(
+      paste,
+      c(
+        inputList$original[
+          ,
+          biological[!(biological %in% c("name", xValue))],
+          drop = FALSE
+        ],
+        list(sep="_")
+      )
     )
-  )
-  plotList$original$scaling <- do.call(
-    paste,
-    c(
-      inputList$original[, scaling[scaling != "name"], drop = FALSE],
-      list(sep="_")
+    plotList$original$scaling <- do.call(
+      paste,
+      c(
+        inputList$original[, scaling[scaling != "name"], drop = FALSE],
+        list(sep="_")
+      )
     )
-  )
   } else if (FacetLabels == "full") {
     # * * FacetLabels - full ----
     plotList$aligned$biological <- do.call(
@@ -816,6 +816,8 @@ plotIt <- function(
 #' @param H0 output of \link{alignReplicates} obeying the null hypothesis. A special
 #' case of \code{H1}.
 #' @param H1 output of \link{alignReplicates}, the general case
+#' @param check logical, if \code{TRUE} verify that \code{H0} is nested in
+#' \code{H1} before computing the statistic.
 #'
 #' @return list with the log-likelihood ratio, statistical information and the
 #' numerical p-value calculated by the evaluating the chi-squared distribution

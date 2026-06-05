@@ -1,4 +1,3 @@
-
 # getSymbols() -----------------------------------------------------------
 
 #' Function to retrieve symbols from formula-formatted input
@@ -15,19 +14,19 @@
 #'
 #' @noRd
 getSymbols <- function(char, exclude = NULL) {
-    ## Parse input data
-    char <- char[char != "0"]
-    out <- parse(text = char, keep.source = TRUE)
-    out <- utils::getParseData(out)
+  ## Parse input data
+  char <- char[char != "0"]
+  out <- parse(text = char, keep.source = TRUE)
+  out <- utils::getParseData(out)
 
-    ## Split the input string at non-caracter symbols
-    names <- unique(out$text[out$token == "SYMBOL"])
+  ## Split the input string at non-caracter symbols
+  names <- unique(out$text[out$token == "SYMBOL"])
 
-    ## Remove strings passed as "exclude"
-    if (!is.null(exclude)) {
-        names <- names[!names %in% exclude]
-    }
-    return(names)
+  ## Remove strings passed as "exclude"
+  if (!is.null(exclude)) {
+    names <- names[!names %in% exclude]
+  }
+  return(names)
 }
 
 
@@ -51,29 +50,29 @@ getSymbols <- function(char, exclude = NULL) {
 
 identifyEffects <- function(biological = NULL, scaling = NULL, error = NULL) {
 
-    ## Get biological scale and error parameters
-    biologicaValues <- getSymbols(as.character(biological)[3])
-    scalingValues <- getSymbols(as.character(scaling)[3])
-    errorValues <- getSymbols(as.character(error)[3])
+  ## Get biological scale and error parameters
+  biologicaValues <- getSymbols(as.character(biological)[3])
+  scalingValues <- getSymbols(as.character(scaling)[3])
+  errorValues <- getSymbols(as.character(error)[3])
 
 
-    # Determine to which class parameters belong
-    biologicalPars <- getSymbols(as.character(biological)[2])
-    scalingPars <- getSymbols(as.character(scaling)[2])
-    errorPars <- getSymbols(as.character(error)[2])
+  # Determine to which class parameters belong
+  biologicalPars <- getSymbols(as.character(biological)[2])
+  scalingPars <- getSymbols(as.character(scaling)[2])
+  errorPars <- getSymbols(as.character(error)[2])
 
-    effectsValues <- list(
-        biologicaValues = biologicaValues,
-        scalingValues = scalingValues,
-        errorValues = errorValues
-    )
-    effectsPars <- list(
-        biologicalPars = biologicalPars,
-        scalingPars = scalingPars,
-        errorPars = errorPars
-    )
+  effectsValues <- list(
+    biologicaValues = biologicaValues,
+    scalingValues = scalingValues,
+    errorValues = errorValues
+  )
+  effectsPars <- list(
+    biologicalPars = biologicalPars,
+    scalingPars = scalingPars,
+    errorPars = errorPars
+  )
 
-    return(list(effectsValues = effectsValues, effectsPars = effectsPars))
+  return(list(effectsValues = effectsValues, effectsPars = effectsPars))
 }
 
 
@@ -97,30 +96,30 @@ identifyEffects <- function(biological = NULL, scaling = NULL, error = NULL) {
 #' @noRd
 #'
 replaceSymbols <- function(what, by, x) {
-    xOrig <- x
-    notZero <- which(x != "0")
-    x <- x[notZero]
-    useNames <- names(x)
-    xParsed <- parse(text = x, keep.source = TRUE)
-    data <- utils::getParseData(xParsed)
-    by <- rep(by, length.out = length(what))
-    names(by) <- what
-    data$text[data$text %in% what] <- by[data$text[data$text %in% what]]
-    data <- data[data$token != "expr", ]
-    breaks <- c(0, which(diff(data$line1) == 1), length(data$line1))
-    out <- lapply(
-        seq_len((length(breaks) - 1)),
-        function(i) {
-            paste(
-                data$text[seq((breaks[i] + 1), (breaks[i + 1]))],
-                collapse = ""
-            )
-        }
-    )
-    names(out) <- useNames
-    out <- unlist(out)
-    xOrig[notZero] <- out
-    return(xOrig)
+  xOrig <- x
+  notZero <- which(x != "0")
+  x <- x[notZero]
+  useNames <- names(x)
+  xParsed <- parse(text = x, keep.source = TRUE)
+  data <- utils::getParseData(xParsed)
+  by <- rep(by, length.out = length(what))
+  names(by) <- what
+  data$text[data$text %in% what] <- by[data$text[data$text %in% what]]
+  data <- data[data$token != "expr", ]
+  breaks <- c(0, which(diff(data$line1) == 1), length(data$line1))
+  out <- lapply(
+    seq_len((length(breaks) - 1)),
+    function(i) {
+      paste(
+        data$text[seq((breaks[i] + 1), (breaks[i + 1]))],
+        collapse = ""
+      )
+    }
+  )
+  names(out) <- useNames
+  out <- unlist(out)
+  xOrig[notZero] <- out
+  return(xOrig)
 }
 
 
@@ -162,48 +161,48 @@ paste_ <- function(...) paste(..., sep = "_")
 #' @noRd
 
 analyzeBlocks <- function(blockMatrix) {
-    out <- which(apply(blockMatrix, 1, sum) == 0)
-    if (length(out) > 0) {
-        blockMatrix <- blockMatrix[-out, ]
-        cat("matrix contains zero rows which have been eliminated\n")
+  out <- which(apply(blockMatrix, 1, sum) == 0)
+  if (length(out) > 0) {
+    blockMatrix <- blockMatrix[-out, ]
+    cat("matrix contains zero rows which have been eliminated\n")
+  }
+
+  noUniqueBiological <- dim(blockMatrix)[1]
+  rComponents <- list()
+  cComponents <- list()
+
+  counter <- 0
+  while (length(unlist(rComponents)) < noUniqueBiological) {
+    counter <- counter + 1
+
+    if (length(unlist(rComponents)) == 0) {
+      w <- 1
+    } else {
+      my_sample <- (1:noUniqueBiological)[-unlist(rComponents)]
+      w <- min(my_sample)
     }
 
-    noUniqueBiological <- dim(blockMatrix)[1]
-    rComponents <- list()
-    cComponents <- list()
-
-    counter <- 0
-    while (length(unlist(rComponents)) < noUniqueBiological) {
-        counter <- counter + 1
-
-        if (length(unlist(rComponents)) == 0) {
-            w <- 1
-        } else {
-            my_sample <- (1:noUniqueBiological)[-unlist(rComponents)]
-            w <- min(my_sample)
-        }
-
-        repeat {
-            v <- unique(
-                rapply(
-                    as.list(w),
-                    function(i) which(blockMatrix[i, ] == 1)
-                )
-            )
-            wNew <- unique(
-                rapply(
-                    as.list(v),
-                    function(j) which(blockMatrix[, j] == 1)
-                )
-            )
-            if (length(wNew) == length(w)) break
-            w <- wNew
-        }
-        rComponents[[counter]] <- w
-        cComponents[[counter]] <- v
+    repeat {
+      v <- unique(
+        rapply(
+          as.list(w),
+          function(i) which(blockMatrix[i, ] == 1)
+        )
+      )
+      wNew <- unique(
+        rapply(
+          as.list(v),
+          function(j) which(blockMatrix[, j] == 1)
+        )
+      )
+      if (length(wNew) == length(w)) break
+      w <- wNew
     }
+    rComponents[[counter]] <- w
+    cComponents[[counter]] <- v
+  }
 
-    return(rComponents)
+  return(rComponents)
 }
 
 
@@ -227,71 +226,74 @@ analyzeBlocks <- function(blockMatrix) {
 #'
 #' @noRd
 splitForScaling <- function(data,
-                              effectsValues,
-                              normalizeInput) {
-    if (!"1" %in% colnames(data)) {
-        data["1"] <- 1
-        intercept <- FALSE
-    } else {
-        intercept <- TRUE
+                            effectsValues,
+                            normalizeInput) {
+  if (!"1" %in% colnames(data)) {
+    data["1"] <- 1
+    intercept <- FALSE
+  } else {
+    intercept <- TRUE
+  }
+
+  # Construnct strings containing the values of the respective effects
+  scalingStrings <- Reduce(paste_, data[effectsValues[[2]]])
+  biologicalStrings <- Reduce(paste_, data[effectsValues[[1]]])
+
+  scalingStringsUnique <- unique(scalingStrings)
+  biologicalStringsUnique <- unique(biologicalStrings)
+
+  # Initialize matrix
+  blockMatrix <- matrix(
+    0,
+    ncol = length(scalingStringsUnique),
+    nrow = length(biologicalStringsUnique)
+  )
+
+  ## For every datapoint set the entry in the matrix to 1, corresponding to the
+  ## index in the respective unique lists of fixed (row) and specific (col)
+  for (i in seq_len(nrow(data))) {
+    useRow <- which(biologicalStringsUnique == biologicalStrings[i])
+    useCol <- which(scalingStringsUnique == scalingStrings[i])
+    blockMatrix[useRow, useCol] <- 1
+  }
+
+  ## compile list of scalings
+  scalingsList <- analyzeBlocks(blockMatrix)
+
+  ## Remove the "1"-column added above
+  if (!intercept) {
+    data <- data[, -which(colnames(data) == "1")]
+  }
+
+  ## Compile the list
+  outList <- lapply(
+    scalingsList,
+    function(l) {
+      data[biologicalStrings %in% biologicalStringsUnique[l], ]
     }
+  )
 
-    # Construnct strings containing the values of the respective effects
-    scalingStrings <- Reduce(paste_, data[effectsValues[[2]]])
-    biologicalStrings <- Reduce(paste_, data[effectsValues[[1]]])
-
-    scalingStringsUnique <- unique(scalingStrings)
-    biologicalStringsUnique <- unique(biologicalStrings)
-
-    # Initialize matrix
-    blockMatrix <- matrix(
-        0,
-        ncol = length(scalingStringsUnique),
-        nrow = length(biologicalStringsUnique)
-    )
-
-    ## For every datapoint set the entry in the matrix to 1, corresponding to the
-    ## index in the respective unique lists of fixed (row) and specific (col)
-    for (i in seq_len(nrow(data))) {
-        useRow <- which(biologicalStringsUnique == biologicalStrings[i])
-        useCol <- which(scalingStringsUnique == scalingStrings[i])
-        blockMatrix[useRow, useCol] <- 1
+  ## normalize the data
+  if (normalizeInput) {
+    for (i in seq_len(length(outList))) {
+      v <- outList[[i]]$value
+      if (all(v > 0)) {
+        ## Strictly positive (linear-scale) data: centre the block
+        ## multiplicatively around 1 by dividing by its mean.
+        outList[[i]]$value <- v / mean(v)
+      } else {
+        ## Data containing zero/negative values - e.g. log-transformed
+        ## input or a log model such as "log(yi) - log(sj)". A
+        ## multiplicative normalization would divide by a mean that can be
+        ## ~0 (log values straddle zero), producing Inf/NaN and breaking the
+        ## optimizer. Centre additively instead, which is the log-space
+        ## equivalent of dividing by the (geometric) mean on linear scale.
+        outList[[i]]$value <- v - mean(v)
+      }
     }
+  }
 
-    ## compile list of scalings
-    scalingsList <- analyzeBlocks(blockMatrix)
-
-    ## Remove the "1"-column added above
-    if (!intercept) {
-        data <- data[, -which(colnames(data) == "1")]
-    }
-
-    ## Compile the list
-    outList <- lapply(
-        scalingsList,
-        function(l) {
-            data[biologicalStrings %in% biologicalStringsUnique[l], ]
-        }
-    )
-
-    ## normalize the data
-    if (normalizeInput) {
-        for (i in seq_len(length(outList))) {
-            outList[[i]]$value <- outList[[i]]$value /
-                mean(outList[[i]]$value)
-            ## give a warning if division by zero is possible
-            if (min(outList[[i]]$value) < 0) {
-                warning(
-                    paste0(
-                        "'normalizeInput == TRUE' and negative input: ",
-                        "division by zero possible."
-                    )
-                )
-            }
-        }
-    }
-
-    return(outList)
+  return(outList)
 }
 
 
@@ -313,66 +315,66 @@ splitForScaling <- function(data,
 #' @noRd
 
 inputCheck <- function(data = NULL,
-                        model = NULL,
-                        errorModel = NULL,
-                        biological = NULL,
-                        scaling = NULL,
-                        error = NULL,
-                        fitLogscale = NULL,
-                        outputScale = NULL) {
+                       model = NULL,
+                       errorModel = NULL,
+                       biological = NULL,
+                       scaling = NULL,
+                       error = NULL,
+                       fitLogscale = NULL,
+                       outputScale = NULL) {
 
-    ## Check if parameters are present
-    if (is.null(model) | is.null(errorModel) | is.null(biological) |
-        is.null(scaling) | is.null(error)) {
-        stop(
-            "All of model, errorModel, biological, scaling, error ",
-            "must be set."
-        )
-    }
-
-    ## check data
-    columnNames <- names(data)
-    expectedNames <- union(
-        getSymbols(as.character(biological)[3]),
-        union(
-            getSymbols(as.character(scaling)[3]),
-            getSymbols(as.character(error)[3])
-        )
+  ## Check if parameters are present
+  if (is.null(model) | is.null(errorModel) | is.null(biological) |
+      is.null(scaling) | is.null(error)) {
+    stop(
+      "All of model, errorModel, biological, scaling, error ",
+      "must be set."
     )
+  }
 
-    if (!all(expectedNames %in% columnNames)) {
-        stop(
-            "Not all column names set in 'biological', 'scaling' and ",
-            "'error' are present in 'data'."
-        )
-    }
+  ## check data
+  columnNames <- names(data)
+  expectedNames <- union(
+    getSymbols(as.character(biological)[3]),
+    union(
+      getSymbols(as.character(scaling)[3]),
+      getSymbols(as.character(error)[3])
+    )
+  )
 
-    ## Check scaling
-    if (!is.logical(fitLogscale)) {
-        stop(
-            "'fitLogscale' must be logical"
-        )
-    }
+  if (!all(expectedNames %in% columnNames)) {
+    stop(
+      "Not all column names set in 'biological', 'scaling' and ",
+      "'error' are present in 'data'."
+    )
+  }
+
+  ## Check scaling
+  if (!is.logical(fitLogscale)) {
+    stop(
+      "'fitLogscale' must be logical"
+    )
+  }
 
 
 
-    ## Stop if formulas have the wrong specification
-    if (length(as.character(biological)) == 1 |
-        length(as.character(scaling)) == 1 | length(as.character(error)) == 1) {
-        stop("Do not pass biological, scaling or error as string.")
-    }
-    if (length(as.character(biological)) < 3) {
-        stop("Left and right-hand side of formula 'biological' is needed")
-    }
-    if (length(as.character(scaling)) < 3) {
-        stop("Left and right-hand side of formula 'scaling' is needed")
-    }
-    if (length(as.character(error)) < 3) {
-        stop("Left and right-hand side of formula 'error' is needed")
-    }
+  ## Stop if formulas have the wrong specification
+  if (length(as.character(biological)) == 1 |
+      length(as.character(scaling)) == 1 | length(as.character(error)) == 1) {
+    stop("Do not pass biological, scaling or error as string.")
+  }
+  if (length(as.character(biological)) < 3) {
+    stop("Left and right-hand side of formula 'biological' is needed")
+  }
+  if (length(as.character(scaling)) < 3) {
+    stop("Left and right-hand side of formula 'scaling' is needed")
+  }
+  if (length(as.character(error)) < 3) {
+    stop("Left and right-hand side of formula 'error' is needed")
+  }
 
-    returnMsg <- "All input checks passed."
-    return(returnMsg)
+  returnMsg <- "All input checks passed."
+  return(returnMsg)
 }
 
 
@@ -537,421 +539,480 @@ inputCheck <- function(data = NULL,
 #'  }
 #' }
 #'
-#' @importFrom rootSolve multiroot
-#' @importFrom trust trust
-#' @importFrom MASS ginv
+#' @importFrom nleqslv nleqslv
 #'
 #' @noRd
 
 scaleTarget <- function(currentData,
-                         passParList) {
+                        passParList) {
 
-    ## Retrieve parameters from list
-    effectsValues <- passParList$effectsValues
-    parameterData <- passParList$parameterData
-    averageTechRep <- passParList$averageTechRep
-    verbose <- passParList$verbose
-    covariates <- passParList$covariates
-    parameters <- passParList$parameters
-    fitLogscale <- passParList$fitLogscale
-    effectsPars <- passParList$effectsPars
-    normalize <- passParList$normalize
-    outputScale <-  passParList$outputScale
-    iterlim <- passParList$iterlim
-
-
-    currentName <- unique(currentData$name)
-
-    ## Add column for error
-    currentData$sigma <- NaN
-
-    ## Add a dummy column filled with 1
-    currentData[["1"]] <- "1"
-
-    ## Initialize the parameter for the current target
-    currentParameter <- NULL
-
-    if (!is.null(parameterData)) {
-        currentParameter <- parameterData[
-            parameterData$name %in% currentData$name,
-        ]
-    }
+  ## Retrieve parameters from list
+  effectsValues <- passParList$effectsValues
+  parameterData <- passParList$parameterData
+  averageTechRep <- passParList$averageTechRep
+  verbose <- passParList$verbose
+  covariates <- passParList$covariates
+  parameters <- passParList$parameters
+  fitLogscale <- passParList$fitLogscale
+  effectsPars <- passParList$effectsPars
+  normalize <- passParList$normalize
+  outputScale <-  passParList$outputScale
+  optControls <- passParList$optControls
+  multistart <- passParList$multistart
+  rootControls <- passParList$rootControls
 
 
-    ## Build a list of string of biological/scaling values present
-    dataFitBiological <- do.call(
-        paste_, currentData[, effectsValues[[1]], drop = FALSE]
-    )
+  currentName <- unique(currentData$name)
 
-    dataFitScaling <- do.call(
-        paste_, currentData[, effectsValues[[2]], drop = FALSE]
-    )
+  ## Add column for error
+  currentData$sigma <- NaN
 
-    ## Reducing datapoints
-    if (averageTechRep) {
-        if (verbose) {
-            cat("Analyzing technical replicates ... ")
-        }
-        groups <- interaction(dataFitBiological, dataFitScaling)
-        if (any(duplicated(groups))) {
-            currentData <- do.call(rbind, lapply(
-                unique(groups),
-                function(g) {
-                    subdata <- currentData[groups == g, ]
-                    outdata <- subdata[1, ]
-                    outdata$value <- mean(subdata$value)
-                    return(outdata)
-                }
-            ))
-            cat(
-                "data points that could not be distinguished by either ",
-                "biological\nor scaling variables have been averaged.\n"
-            )
-        } else {
-            if (verbose) {
-                cat("none found.\n")
-            }
-        }
-    }
+  ## Add a dummy column filled with 1
+  currentData[["1"]] <- "1"
 
-    ## compile dataset fit for fitting
-    dataFit <- data.frame(
-        currentData[
-            ,
-            union(c("name", "time", "value", "sigma"), covariates)
-        ],
-        biological = do.call(
-            paste_,
-            currentData[, effectsValues[[1]], drop = FALSE]
-        ),
-        scaling = do.call(
-            paste_,
-            currentData[, effectsValues[[2]], drop = FALSE]
-        ),
-        error = do.call(
-            paste_,
-            currentData[, effectsValues[[3]], drop = FALSE]
-        ),
-        stringsAsFactors = FALSE
-    )
+  ## Initialize the parameter for the current target
+  currentParameter <- NULL
 
-    ## Retrieve (unique) list of biological, scaling and error values
-    levelsList <- list(
-        biological = unique(as.character(dataFit$biological)),
-        scaling = unique(as.character(dataFit$scaling)),
-        error = unique(as.character(dataFit$error))
-    )
+  if (!is.null(parameterData)) {
+    currentParameter <- parameterData[
+      parameterData$name %in% currentData$name,
+    ]
+  }
 
-    ## Combine above lists allLevels will therefore have the length of the
-    ## sum of all different biological, scaling and error values (in that order)
-    allLevels <- unlist(
-        lapply(
-            seq_along(parameters),
-            function(k) {
-                switch(names(parameters)[k],
-                    biological = levelsList[[1]],
-                    scaling = levelsList[[2]],
-                    error = levelsList[[3]]
-                )
-            }
-        )
-    )
-    #
-    initPars <- genInitPars(
-        parameters,
-        fitLogscale,
-        levelsList
-    )
-    #
-    mask <- genMask(
-        initPars,
-        parameters,
-        allLevels,
-        dataFit
-    )
 
-    fitParsBiological <- NULL
+  ## Build a list of string of biological/scaling values present
+  dataFitBiological <- do.call(
+    paste_, currentData[, effectsValues[[1]], drop = FALSE]
+  )
 
+  dataFitScaling <- do.call(
+    paste_, currentData[, effectsValues[[2]], drop = FALSE]
+  )
+
+  ## Reducing datapoints
+  if (averageTechRep) {
     if (verbose) {
-        cat("Starting fit\n")
+      cat("Analyzing technical replicates ... ")
+    }
+    groups <- interaction(dataFitBiological, dataFitScaling)
+    if (any(duplicated(groups))) {
+      currentData <- do.call(rbind, lapply(
+        unique(groups),
+        function(g) {
+          subdata <- currentData[groups == g, ]
+          outdata <- subdata[1, ]
+          outdata$value <- mean(subdata$value)
+          return(outdata)
+        }
+      ))
+      cat(
+        "data points that could not be distinguished by either ",
+        "biological\nor scaling variables have been averaged.\n"
+      )
+    } else {
+      if (verbose) {
+        cat("none found.\n")
+      }
+    }
+  }
+
+  ## compile dataset fit for fitting
+  dataFit <- data.frame(
+    currentData[
+      ,
+      union(c("name", "time", "value", "sigma"), covariates)
+    ],
+    biological = do.call(
+      paste_,
+      currentData[, effectsValues[[1]], drop = FALSE]
+    ),
+    scaling = do.call(
+      paste_,
+      currentData[, effectsValues[[2]], drop = FALSE]
+    ),
+    error = do.call(
+      paste_,
+      currentData[, effectsValues[[3]], drop = FALSE]
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  ## Retrieve (unique) list of biological, scaling and error values
+  levelsList <- list(
+    biological = unique(as.character(dataFit$biological)),
+    scaling = unique(as.character(dataFit$scaling)),
+    error = unique(as.character(dataFit$error))
+  )
+
+  ## Combine above lists allLevels will therefore have the length of the
+  ## sum of all different biological, scaling and error values (in that order)
+  allLevels <- unlist(
+    lapply(
+      seq_along(parameters),
+      function(k) {
+        switch(names(parameters)[k],
+               biological = levelsList[[1]],
+               scaling = levelsList[[2]],
+               error = levelsList[[3]]
+        )
+      }
+    )
+  )
+  #
+  initPars <- genInitPars(
+    parameters,
+    fitLogscale,
+    levelsList
+  )
+  #
+  mask <- genMask(
+    initPars,
+    parameters,
+    allLevels,
+    dataFit
+  )
+
+  fitParsBiological <- NULL
+
+  if (verbose) {
+    cat("Starting fit\n")
+  }
+
+  passParList2 <- list(
+    dataFit = dataFit,
+    levelsList = levelsList,
+    fitParsBiological = fitParsBiological,
+    effectsPars = effectsPars,
+    mask = mask,
+    initPars = initPars
+  )
+
+  # * call of trust() function ----------------------------------------------
+
+  ## Build trust() arguments from optControls
+  trustArgs <- list(
+    objfun    = objFunction,
+    parinit   = initPars,
+    rinit     = optControls$rinit,
+    rmax      = optControls$rmax,
+    iterlim   = optControls$iterlim,
+    fterm     = optControls$fterm,
+    mterm     = optControls$mterm,
+    blather   = verbose,
+    passParList  = passParList,
+    passParList2 = passParList2
+  )
+  if (!isFALSE(optControls$parscale) && !is.null(optControls$parscale)) {
+    trustArgs$parscale <- optControls$parscale
+  }
+
+  ## --- Multistart --------------------------------------------------------
+  ## Run trust() once from the default init; if multistart > 1, also run
+  ## from (multistart - 1) random perturbations and keep the best result.
+
+  runTrust <- function(parinit) {
+    args <- trustArgs
+    args$parinit <- parinit
+    do.call(trust, args)
+  }
+
+  ## First run from default initPars
+  fitResult <- runTrust(initPars)
+
+  if (multistart > 1L) {
+    if (verbose) cat("Multistart: running", multistart - 1L, "additional starts ... ")
+    for (ms in seq_len(multistart - 1L)) {
+      initParsPerturbed <- initPars + rnorm(length(initPars), mean = 0, sd = 3)
+      msResult <- tryCatch(runTrust(initParsPerturbed), error = function(e) NULL)
+      if (!is.null(msResult) && msResult$converged && msResult$value < fitResult$value) {
+        fitResult <- msResult
+      }
+    }
+    if (verbose) cat("done\n")
+  }
+
+  if (!fitResult$converged) {
+    warning(paste("Non-converged fit for target", currentName))
+  } else if (verbose == TRUE) {
+    cat("Fit converged.\n")
+  }
+
+  residualsFit <- resolveFunction(
+    currentPars = fitResult$argument,
+    passParList = passParList,
+    passParList2 = passParList2,
+    calcDeriv = FALSE
+  )
+
+  bessel <- sqrt(
+    nrow(dataFit) / (nrow(dataFit) - length(initPars) +
+                       normalize)
+  )
+
+  ## Get singular values for diagnostic purposes
+  singleValues <- svd(fitResult[["hessian"]])[["d"]]
+  tol <- sqrt(.Machine$double.eps)
+  nonIdentifiable <- which(singleValues < tol * singleValues[1])
+  if (length(nonIdentifiable) > 0 && verbose) {
+    cat("Note: ", length(nonIdentifiable),
+        " eigenvalue(s) of Hessian below tolerance.\n")
+  }
+
+  # * parameter table -------------------------------------------------------
+  # Generate parameter table
+
+  parTable <- data.frame(
+    name = currentName,
+    level = c(
+      rep(levelsList[[1]], length(effectsPars[[1]])),
+      rep(levelsList[[2]], length(effectsPars[[2]])),
+      rep(levelsList[[3]], length(effectsPars[[3]]))
+    ),
+    parameter = names(fitResult$argument),
+    value = fitResult$argument,
+
+
+
+    nll = fitResult$value,
+    noPars = length(fitResult$argument) - normalize,
+    noData = nrow(dataFit)
+  )
+
+  ## Calculating the error from the inverse of the Fisher information
+  ## matrix which is in this case the Hessian, to which the above
+  ## calculated Bessel correction is applied.
+  parTable$sigma <- as.numeric(
+    sqrt(diag(2 * MASS::ginv(fitResult$hessian)))
+  ) * bessel
+
+
+
+
+  ## transform parameters back if fitted on log scale
+  if (fitLogscale == TRUE) {
+    parTable$value <- exp(parTable$value)
+    parTable$sigma <- parTable$value * parTable$sigma
+  }
+  parTable$lower <- parTable$value - parTable$sigma
+  parTable$upper <- parTable$value + parTable$sigma
+
+  if (verbose) {
+    cat("Estimated parameters on non-log scale:\n")
+    print(parTable)
+    cat(
+      "converged:", fitResult$converged, ", iterations:",
+      fitResult$iterations, "\n"
+    )
+    cat("-2*LL: ", fitResult$value, "on", nrow(currentData) +
+          normalize - length(fitResult$argument), "degrees of freedom\n")
+  }
+
+  attr(parTable, "value") <- fitResult$value
+  attr(parTable, "df") <- nrow(currentData) + normalize -
+    length(fitResult$argument)
+
+
+  # * outPrediction --------------------------------------------------------
+  ## Predicted data
+  outPrediction <- currentData
+  outPrediction$value <- fitResult$prediction
+  outPrediction$sigma <- fitResult$sigma * bessel
+  outPrediction$lower <- outPrediction$value - outPrediction$sigma
+  outPrediction$upper <- outPrediction$value + outPrediction$sigma
+
+
+
+
+
+  # * outScaled ------------------------------------------------------------
+  ## Initialize list for scaled values
+  initialValuesScaled <- rep(0, nrow(currentData))
+  if (verbose) {
+    cat("Inverting model ... ")
+  }
+
+  ## -------------------------------------------------------------------
+  ## Strategy: try analytical inverse first, fall back to nleqslv.
+  ## -------------------------------------------------------------------
+
+  analyticResult <- evaluateAnalyticInverse(
+    parList = residualsFit[-1],
+    passParList = passParList,
+    passParList2 = passParList2
+  )
+
+  if (!is.null(analyticResult)) {
+    ## Analytical inverse succeeded
+    valuesScaled <- analyticResult$values
+    myDeriv <- analyticResult$jacobian
+    if (verbose) cat("done (analytic)\n")
+
+  } else {
+    ## Fallback: numerical inversion via nleqslv
+    if (verbose && !is.null(passParList$analyticInverseExpr)) {
+      cat("analytic eval failed, falling back to nleqslv ... ")
     }
 
-    passParList2 <- list(
-        dataFit = dataFit,
-        levelsList = levelsList,
-        fitParsBiological = fitParsBiological,
-        effectsPars = effectsPars,
-        mask = mask,
-        initPars = initPars
+    n_data <- length(initialValuesScaled)
+
+    ## Wrapper: nleqslv expects jac to return a matrix
+    jacWrapper <- function(x, ...) {
+      dv <- as.numeric(evaluateModelJacobian(x, ...))
+      n <- length(dv)
+      J <- matrix(0, n, n)
+      diag(J) <- dv
+      J
+    }
+
+    ## Build nleqslv arguments, strip reserved names from rootControls
+    reservedNames <- c("x", "fn", "jac", "parList", "passParList",
+                       "passParList2")
+    safeRootControls <- rootControls[
+      !names(rootControls) %in% reservedNames
+    ]
+    ## Default to allowSingular for robustness
+    if (is.null(safeRootControls$control)) {
+      safeRootControls$control <- list(allowSingular = TRUE)
+    } else if (is.null(safeRootControls$control$allowSingular)) {
+      safeRootControls$control$allowSingular <- TRUE
+    }
+
+    rootArgs <- c(
+      list(
+        x = initialValuesScaled,
+        fn = evaluateModel,
+        jac = jacWrapper,
+        parList = residualsFit[-1],
+        passParList = passParList,
+        passParList2 = passParList2
+      ),
+      safeRootControls
     )
 
-    # * call of trust() function ----------------------------------------------
+    nleqslvResult <- try(
+      do.call(nleqslv::nleqslv, rootArgs),
+      silent = TRUE
+    )
 
-    MultiStart <- F
-    if(MultiStart){
-      myfitResult <- do.call(rbind, lapply(1:50, function(i){
-        initParsSample <- initPars + rnorm(n = length(initPars), mean = 0, sd = 3)
-        fitResult <- trust::trust(
-          objfun = objFunction,
-          parinit = initPars,
-          rinit = 1,
-          rmax = 10,
-          iterlim = iterlim,
-          blather = verbose,
+    nleqslvConverged <- !inherits(nleqslvResult, "try-error") &&
+      nleqslvResult$termcd %in% c(1, 2)
+
+    if (nleqslvConverged) {
+      valuesScaled <- nleqslvResult$x
+      myDeriv <- abs(
+        evaluateModelJacobian(
+          valuesScaled,
+          residualsFit[-1],
           passParList = passParList,
           passParList2 = passParList2
         )
-        pars <- c(fitResult$value,fitResult$argument)
-        names(pars) <- c("value", names(initPars))
-        pars
-      }))
-      print(head(myfitResult, 3))
-    }
-    fitResult <- trust::trust(
-        objfun = objFunction,
-        parinit = initPars,
-        rinit = 1,
-        rmax = 10,
-        iterlim = iterlim,
-        blather = verbose,
-        passParList = passParList,
-        passParList2 = passParList2
-    )
-
-    if (!fitResult$converged) {
-        warning(paste("Non-converged fit for target", currentName))
-    } else if (verbose == TRUE) {
-        cat("Fit converged.\n")
-    }
-
-    residualsFit <- resolveFunction(
-        currentPars = fitResult$argument,
-        passParList = passParList,
-        passParList2 = passParList2,
-        calcDeriv = FALSE
-    )
-
-    bessel <- sqrt(
-        nrow(dataFit) / (nrow(dataFit) - length(initPars) +
-            normalize)
-    )
-
-    ## Get singular values (roots of non negative eigenvalues of M^* \cdot M)
-    ## here it is synonymous with eigenvalue.
-    singleValues <- svd(fitResult[["hessian"]])[["d"]]
-
-    ## Define a tollerance threshold, the root of the machine precission is
-    ## a usual value for this threshold.
-    tol <- sqrt(.Machine$double.eps)
-
-    ## Define nonidentifiable as being "to small to handle", judged by the
-    ## above defined threshold
-    nonIdentifiable <- which(singleValues < tol * singleValues[1])
-    if (length(nonIdentifiable) > 0) {
-        warning("Eigenvalue(s) of Hessian below tolerance. Parameter
-                  uncertainties might be underestimated.")
-    }
-
-    # * parameter table -------------------------------------------------------
-    # Generate parameter table
-
-    parTable <- data.frame(
-        name = currentName,
-        level = c(
-            rep(levelsList[[1]], length(effectsPars[[1]])),
-            rep(levelsList[[2]], length(effectsPars[[2]])),
-            rep(levelsList[[3]], length(effectsPars[[3]]))
-        ),
-        parameter = names(fitResult$argument),
-        value = fitResult$argument,
-
-
-
-        nll = fitResult$value,
-        noPars = length(fitResult$argument) - normalize,
-        noData = nrow(dataFit)
-    )
-
-    ## Calculating the error from the inverse of the Fisher information
-    ## matrix which is in this case the Hessian, to which the above
-    ## calculated Bessel correction is applied.
-    parTable$sigma <- as.numeric(
-      sqrt(diag(2 * MASS::ginv(fitResult$hessian)))
-    ) * bessel
-
-
-
-
-    ## transform parameters back if fitted on log scale
-    if (fitLogscale == TRUE) {
-        parTable$value <- exp(parTable$value)
-        parTable$sigma <- parTable$value * parTable$sigma
-        parTable$lower <- parTable$value -
-          parTable$sigma
-        parTable$upper <- parTable$value +
-          parTable$sigma
-
-
-
-
-    }
-
-    if (verbose) {
-        cat("Estimated parameters on non-log scale:\n")
-        print(parTable)
-        cat(
-            "converged:", fitResult$converged, ", iterations:",
-            fitResult$iterations, "\n"
-        )
-        cat("-2*LL: ", fitResult$value, "on", nrow(currentData) +
-            normalize - length(fitResult$argument), "degrees of freedom\n")
-    }
-
-    attr(parTable, "value") <- fitResult$value
-    attr(parTable, "df") <- nrow(currentData) + normalize -
-        length(fitResult$argument)
-
-
-    # * outPrediction --------------------------------------------------------
-    ## Predicted data
-    outPrediction <- currentData
-    outPrediction$value <- fitResult$prediction
-    outPrediction$sigma <- fitResult$sigma * bessel
-    outPrediction$lower <- outPrediction$value - outPrediction$sigma
-    outPrediction$upper <- outPrediction$value + outPrediction$sigma
-
-
-
-
-
-    # * outScaled ------------------------------------------------------------
-    ## Initialize list for scaled values
-    initialValuesScaled <- rep(0, nrow(currentData))
-    if (verbose) {
-        cat("Inverting model ... ")
-    }
-
-
-    valuesScaled <- try(
-        rootSolve::multiroot(
-            f = evaluateModel,
-            start = initialValuesScaled,
-            jacfunc = evaluateModelJacobian,
-            parList = residualsFit[-1],
-            verbose = FALSE,
-            passParList = passParList,
-            passParList2 = passParList2
-        )$root,
-        silent = TRUE
-    )
-    if (verbose) {
-        cat("done\n")
-    }
-
-    if (inherits(valuesScaled, "try-error")) {
-        outScaled <- NULL
-        warning("Rescaling to common scale not possible.
-                  Equations not invertible.")
+      )
     } else {
-        myDeriv <- abs(
-            evaluateModelJacobian(
-                valuesScaled,
-                residualsFit[-1],
-                passParList = passParList,
-                passParList2 = passParList2
-            )
-        )
-        sigmasScaled <- fitResult$sigma * bessel / myDeriv
-
-        # transform parameters back if fitted on log scale
-        if (fitLogscale == TRUE) {
-            valuesScaled <- exp(valuesScaled)
-            sigmasScaled <- valuesScaled * sigmasScaled
-        }
-        upperScaled <- valuesScaled + sigmasScaled
-        lowerScaled <- valuesScaled - sigmasScaled
-
-        outScaled <- currentData
-        outScaled$value <- valuesScaled
-        outScaled$sigma <- sigmasScaled
-        outScaled$upper <- upperScaled
-        outScaled$lower <- lowerScaled
+      if (!inherits(nleqslvResult, "try-error")) {
+        warning("nleqslv did not converge for target ",
+                currentName, " (termcd: ", nleqslvResult$termcd,
+                " - ", nleqslvResult$message, ")")
+      }
+      valuesScaled <- try(stop("inversion failed"), silent = TRUE)
     }
 
+    if (verbose) cat("done (numeric)\n")
+  }
 
-    # * outAligned -----------------------------------------------------------
-    noInitial <- length(levelsList[[1]])
-
-    ## Use one datapoint per unique set of fixed parameters
-    outAligned <- currentData[
-        !duplicated(dataFit$biological),
-        intersect(effectsValues[[1]], colnames(currentData))
-    ]
-
-    ## The values are the fitted parameters for the respective fixed
-    ## parameter ensembles.
-    outAligned$value <- residualsFit[[effectsPars[[1]][1]]]
-    outAligned$parameter <- c(
-        do.call(
-            rbind,
-            lapply(
-                seq_len(nrow(outAligned)),
-                function (i) {
-                    out <- parTable[
-                        which(parTable$level == do.call(
-                            paste_,
-                            c(outAligned[i,effectsValues[[1]]])
-                        )
-                        ),
-                    ]$parameter
-                }
-            )
-        )
-    )
-
-    outAligned$sigma <- as.numeric(
-      sqrt(diag(2 * MASS::ginv(fitResult$hessian)))
-    )[seq_len(noInitial)] * bessel
-
+  ## --- Build outScaled from inversion result ----------------------------
+  if (inherits(valuesScaled, "try-error")) {
+    outScaled <- NULL
+    warning("Rescaling to common scale not possible for target ",
+            currentName, ". Equations not invertible.")
+  } else {
+    sigmasScaled <- fitResult$sigma * bessel / myDeriv
 
     # transform parameters back if fitted on log scale
     if (fitLogscale == TRUE) {
-        outAligned$value <- exp(outAligned$value)
-        outAligned$sigma <- outAligned$value * outAligned$sigma
-        outAligned$lower <- outAligned$value -
-          outAligned$sigma
-        outAligned$upper <- outAligned$value +
-          outAligned$sigma
+      valuesScaled <- exp(valuesScaled)
+      sigmasScaled <- valuesScaled * sigmasScaled
     }
+    upperScaled <- valuesScaled + sigmasScaled
+    lowerScaled <- valuesScaled - sigmasScaled
+
+    outScaled <- currentData
+    outScaled$value <- valuesScaled
+    outScaled$sigma <- sigmasScaled
+    outScaled$upper <- upperScaled
+    outScaled$lower <- lowerScaled
+  }
 
 
-    # * outOrigParameters -------------------------------------------------
-    outOrigParameters <- currentData
-    for (k in seq_along(parameters)) {
-        effect <- names(parameters)[k]
-        useLevels <- as.character(dataFit[[effect]])
-        index0 <- which(
-            as.character(
-                gsub('[_0-9]+', '', parTable$parameter)
-                ) == parameters[k]
-        )
-        index1 <- match(useLevels, as.character(parTable$level[index0]))
-        index <- index0[index1]
-        outOrigParameters[[parameters[k]]] <- parTable$value[index]
-    }
-    out <- list(
-        outPrediction = outPrediction,
-        outScaled = outScaled,
-        outAligned = outAligned,
-        original = currentData,
-        outOrigParameters = outOrigParameters,
-        parTable = parTable
+  # * outAligned -----------------------------------------------------------
+  noInitial <- length(levelsList[[1]])
+
+  ## Use one datapoint per unique set of fixed parameters
+  outAligned <- currentData[
+    !duplicated(dataFit$biological),
+    intersect(effectsValues[[1]], colnames(currentData))
+  ]
+
+  ## The values are the fitted parameters for the respective fixed
+  ## parameter ensembles.
+  outAligned$value <- residualsFit[[effectsPars[[1]][1]]]
+  outAligned$parameter <- c(
+    do.call(
+      rbind,
+      lapply(
+        seq_len(nrow(outAligned)),
+        function (i) {
+          out <- parTable[
+            which(parTable$level == do.call(
+              paste_,
+              c(outAligned[i,effectsValues[[1]]])
+            )
+            ),
+          ]$parameter
+        }
+      )
     )
+  )
+
+  outAligned$sigma <- as.numeric(
+    sqrt(diag(2 * MASS::ginv(fitResult$hessian)))
+  )[seq_len(noInitial)] * bessel
+
+  # transform parameters back if fitted on log scale
+  if (fitLogscale == TRUE) {
+    outAligned$value <- exp(outAligned$value)
+    outAligned$sigma <- outAligned$value * outAligned$sigma
+  }
+  outAligned$lower <- outAligned$value - outAligned$sigma
+  outAligned$upper <- outAligned$value + outAligned$sigma
+
+
+  # * outOrigParameters -------------------------------------------------
+  outOrigParameters <- currentData
+  for (k in seq_along(parameters)) {
+    effect <- names(parameters)[k]
+    useLevels <- as.character(dataFit[[effect]])
+    index0 <- which(
+      as.character(
+        gsub('[_0-9]+', '', parTable$parameter)
+      ) == parameters[k]
+    )
+    index1 <- match(useLevels, as.character(parTable$level[index0]))
+    index <- index0[index1]
+    outOrigParameters[[parameters[k]]] <- parTable$value[index]
+  }
+  out <- list(
+    outPrediction = outPrediction,
+    outScaled = outScaled,
+    outAligned = outAligned,
+    original = currentData,
+    outOrigParameters = outOrigParameters,
+    parTable = parTable
+  )
 
 
 
 
-    return(out)
+  return(out)
 }
 
 
@@ -975,60 +1036,60 @@ scaleTarget <- function(currentData,
 #' @noRd
 
 genInitPars <- function(parameters,
-                                  fitLogscale,
-                                  levelsList) {
-    ## Create a named vector with initial values for all parameters. The name
-    ## is the parameter, and the initial value is 0 for log and 1 for linear.
-    ## each parameter name-value entry is repeated as many times as there are
-    ## measurements of the i'th target with this parameter.
-    ## Example: biological is passed as "ys ~ condition", so the entry with name
-    ##   "ys" will be repeated for as many times as there are measurements
-    ##   with the same "condition" entry.
-    initPars <- do.call(
-        "c",
-        lapply(
-            seq_along(parameters),
-            ## Go through all parameters with current parameter n
-            function(n) {
-                if (fitLogscale == TRUE) {
-                    v <- 0
-                } else {
-                    v <- 1
-                }
-                ## Let l be the number of measurements of same type (biological,
-                ## scaling or error) for the current n
-                l <- switch(
-                    ## Get "biological", "scaling" or "error" from the current n
-                    names(parameters)[n],
-                    biological = length(levelsList[[1]]),
-                    scaling = length(levelsList[[2]]),
-                    error = length(levelsList[[3]])
-                )
-
-                ## Get the n'th parameter
-                p <- as.character(parameters[n])
-
-                ## The variable "parValues" will have l times the entry
-                ## "v" (0 for log, 1 for linear) with the corresponding
-                ## parameter as the name.
-                parValues <-
-                    structure(
-                        rep(v, l),
-                        names = rep(p, l)
-                    )
-                return(parValues)
-            }
+                        fitLogscale,
+                        levelsList) {
+  ## Create a named vector with initial values for all parameters. The name
+  ## is the parameter, and the initial value is 0 for log and 1 for linear.
+  ## each parameter name-value entry is repeated as many times as there are
+  ## measurements of the i'th target with this parameter.
+  ## Example: biological is passed as "ys ~ condition", so the entry with name
+  ##   "ys" will be repeated for as many times as there are measurements
+  ##   with the same "condition" entry.
+  initPars <- do.call(
+    "c",
+    lapply(
+      seq_along(parameters),
+      ## Go through all parameters with current parameter n
+      function(n) {
+        if (fitLogscale == TRUE) {
+          v <- 0
+        } else {
+          v <- 1
+        }
+        ## Let l be the number of measurements of same type (biological,
+        ## scaling or error) for the current n
+        l <- switch(
+          ## Get "biological", "scaling" or "error" from the current n
+          names(parameters)[n],
+          biological = length(levelsList[[1]]),
+          scaling = length(levelsList[[2]]),
+          error = length(levelsList[[3]])
         )
+
+        ## Get the n'th parameter
+        p <- as.character(parameters[n])
+
+        ## The variable "parValues" will have l times the entry
+        ## "v" (0 for log, 1 for linear) with the corresponding
+        ## parameter as the name.
+        parValues <-
+          structure(
+            rep(v, l),
+            names = rep(p, l)
+          )
+        return(parValues)
+      }
     )
+  )
 
-    ## give intividual names
-    names(initPars) <- paste(
-        names(initPars),
-        seq_along(initPars),
-        sep = "_"
-        )
+  ## give intividual names
+  names(initPars) <- paste(
+    names(initPars),
+    seq_along(initPars),
+    sep = "_"
+  )
 
-    return(initPars)
+  return(initPars)
 }
 
 
@@ -1060,28 +1121,28 @@ genInitPars <- function(parameters,
 #' @noRd
 
 genMask <- function(initPars,
-                          parameters,
-                          allLevels,
-                          dataFit) {
-    mask <- lapply(
-        seq_along(initPars),
-        function(k) {
-            effect <- getParClass(
-                parameters[
-                    match(
-                        getParClass(initPars)[k],
-                        parameters
-                    )
-                ]
-            )
-            mask_vector <- as.numeric(
-                dataFit[[effect]] == allLevels[k]
-            )
-            return(mask_vector)
-        }
-    )
+                    parameters,
+                    allLevels,
+                    dataFit) {
+  mask <- lapply(
+    seq_along(initPars),
+    function(k) {
+      effect <- getParClass(
+        parameters[
+          match(
+            getParClass(initPars)[k],
+            parameters
+          )
+        ]
+      )
+      mask_vector <- as.numeric(
+        dataFit[[effect]] == allLevels[k]
+      )
+      return(mask_vector)
+    }
+  )
 
-    return(mask)
+  return(mask)
 }
 
 
@@ -1123,57 +1184,57 @@ genMask <- function(initPars,
 #' @noRd
 #'
 resolveFunction <- function(currentPars,
-                             passParList,
-                             passParList2,
-                             calcDeriv) {
-    if (FALSE) {
-        currentPars <- initPars
+                            passParList,
+                            passParList2,
+                            calcDeriv) {
+  if (FALSE) {
+    currentPars <- initPars
+  }
+
+
+  parameters <- passParList$parameters
+  fitParsBiological <- passParList2$fitParsBiological
+  levelsList <- passParList2$levelsList
+  effectsPars <- passParList2$effectsPars
+
+  parsAll <- c(currentPars, fitParsBiological)
+  parList <- lapply(
+    parameters,
+    function(n) {
+      parClass <- gsub('[_0-9]+', '', names(parsAll))
+      subpar <- parsAll[parClass == n]
+      if (n %in% effectsPars[[1]]) {
+        ## Rename entries of the first list (fixed)
+        names(subpar) <- levelsList[[1]]
+      }
+      if (n %in% effectsPars[[2]]) {
+        ## Rename entries of the second list (latent)
+        names(subpar) <- levelsList[[2]]
+      }
+      if (n %in% effectsPars[[3]]) {
+        ## Rename entries of the third list (error)
+        names(subpar) <- levelsList[[3]]
+      }
+      return(subpar)
     }
+  )
 
+  ## Rename the thre lists
+  names(parList) <- parameters
 
-    parameters <- passParList$parameters
-    fitParsBiological <- passParList2$fitParsBiological
-    levelsList <- passParList2$levelsList
-    effectsPars <- passParList2$effectsPars
-
-    parsAll <- c(currentPars, fitParsBiological)
-    parList <- lapply(
-        parameters,
-        function(n) {
-            parClass <- gsub('[_0-9]+', '', names(parsAll))
-            subpar <- parsAll[parClass == n]
-            if (n %in% effectsPars[[1]]) {
-                ## Rename entries of the first list (fixed)
-                names(subpar) <- levelsList[[1]]
-            }
-            if (n %in% effectsPars[[2]]) {
-                ## Rename entries of the second list (latent)
-                names(subpar) <- levelsList[[2]]
-            }
-            if (n %in% effectsPars[[3]]) {
-                ## Rename entries of the third list (error)
-                names(subpar) <- levelsList[[3]]
-            }
-            return(subpar)
-        }
-    )
-
-    ## Rename the thre lists
-    names(parList) <- parameters
-
-    ## Create list of residuals and attach the corresponding current
-    ## parameters
-    c(
-        list(
-            residuals = rssModel(
-                parList,
-                passParList,
-                passParList2,
-                calcDeriv = calcDeriv
-            )
-        ),
-        parList
-    )
+  ## Create list of residuals and attach the corresponding current
+  ## parameters
+  c(
+    list(
+      residuals = rssModel(
+        parList,
+        passParList,
+        passParList2,
+        calcDeriv = calcDeriv
+      )
+    ),
+    parList
+  )
 }
 
 
@@ -1221,87 +1282,87 @@ resolveFunction <- function(currentPars,
 #'
 #' @noRd
 rssModel <- function(parList,
-                      passParList,
-                      passParList2,
-                      calcDeriv = TRUE) {
-    modelExpr <- passParList$modelExpr
-    errorModelExpr <- passParList$errorModelExpr
-    constrExpr <- passParList$constrExpr
-    modelJacobianExpr <- passParList$modelJacobianExpr
-    errorModelJacobianExpr <- passParList$errorModelJacobianExpr
+                     passParList,
+                     passParList2,
+                     calcDeriv = TRUE) {
+  modelExpr <- passParList$modelExpr
+  errorModelExpr <- passParList$errorModelExpr
+  constrExpr <- passParList$constrExpr
+  modelJacobianExpr <- passParList$modelJacobianExpr
+  errorModelJacobianExpr <- passParList$errorModelJacobianExpr
 
-    dataFit <- passParList2$dataFit
+  dataFit <- passParList2$dataFit
 
-    with(
-        ## paste list with entries: name, time, value, sigma, the effects and
-        ## their paramters
-        c(as.list(dataFit), parList), {
-          if(F) {
-            name <- c(as.list(dataFit), parList)$name
-            time <- c(as.list(dataFit), parList)$time
-            value <- c(as.list(dataFit), parList)$value
-            sigma <- c(as.list(dataFit), parList)$sigma
-            biological <- c(as.list(dataFit), parList)$biological
-            scaling <- c(as.list(dataFit), parList)$scaling
-            error <- c(as.list(dataFit), parList)$error
-            yi <- c(as.list(dataFit), parList)$yi
-            sj <- c(as.list(dataFit), parList)$sj
-            sigmaR <- c(as.list(dataFit), parList)$sigmaR
-            sigmaA <- c(as.list(dataFit), parList)$sigmaA
+  with(
+    ## paste list with entries: name, time, value, sigma, the effects and
+    ## their paramters
+    c(as.list(dataFit), parList), {
+      if(F) {
+        name <- c(as.list(dataFit), parList)$name
+        time <- c(as.list(dataFit), parList)$time
+        value <- c(as.list(dataFit), parList)$value
+        sigma <- c(as.list(dataFit), parList)$sigma
+        biological <- c(as.list(dataFit), parList)$biological
+        scaling <- c(as.list(dataFit), parList)$scaling
+        error <- c(as.list(dataFit), parList)$error
+        yi <- c(as.list(dataFit), parList)$yi
+        sj <- c(as.list(dataFit), parList)$sj
+        sigmaR <- c(as.list(dataFit), parList)$sigmaR
+        sigmaA <- c(as.list(dataFit), parList)$sigmaA
+      }
+      ## Generate lists var and prediction with <NoOfMeasurements> entries
+      ## and initialize the it with 1
+      prediction <- var <- rep(1, length(value))
+
+      ## Get the prediction by evaluating the model
+      prediction[seq_along(prediction)] <- eval(modelExpr)
+
+      ## Create residuals: differences between prediction and measurements
+      res <- prediction - value
+
+      ## Generate variances by squaring the evaluated error model
+      var[seq_along(var)] <- eval(errorModelExpr)^2
+
+      ## Evaluate constraints
+      constr <- eval(constrExpr)
+
+      ## Create list of residuals
+      residuals <- c(res / sqrt(var), var, constr)
+
+      ## Initialize variables for derivatives
+      residualDeriv <- varianceDeriv <- NULL
+
+      ## Calculate derivatives if wished
+      if (calcDeriv) {
+        jac <- lapply(
+          seq_len(length(parList)),
+          function(k) {
+            ## Initialize lists
+            vMod <- vErr <- rep(0, length(value))
+
+            ## Get derivatives for model and errormodel
+            vMod[seq_len(length(value))] <- eval(
+              modelJacobianExpr[[k]]
+            )
+            vErr[seq_len(length(value))] <- eval(
+              errorModelJacobianExpr[[k]]
+            )
+
+            residualDeriv <- vMod / sqrt(var) - vErr * res / var
+            varianceDeriv <- vErr * 2 * sqrt(var)
+            list(residualDeriv, varianceDeriv)
           }
-            ## Generate lists var and prediction with <NoOfMeasurements> entries
-            ## and initialize the it with 1
-            prediction <- var <- rep(1, length(value))
+        )
 
-            ## Get the prediction by evaluating the model
-            prediction[seq_along(prediction)] <- eval(modelExpr)
+        residualDeriv <- lapply(jac, function(j) j[[1]])
+        varianceDeriv <- lapply(jac, function(j) j[[2]])
+      }
+      attr(residuals, "residualDeriv") <- residualDeriv
+      attr(residuals, "varianceDeriv") <- varianceDeriv
 
-            ## Create residuals: differences between prediction and measurements
-            res <- prediction - value
-
-            ## Generate variances by squaring the evaluated error model
-            var[seq_along(var)] <- eval(errorModelExpr)^2
-
-            ## Evaluate constraints
-            constr <- eval(constrExpr)
-
-            ## Create list of residuals
-            residuals <- c(res / sqrt(var), var, constr)
-
-            ## Initialize variables for derivatives
-            residualDeriv <- varianceDeriv <- NULL
-
-            ## Calculate derivatives if wished
-            if (calcDeriv) {
-                jac <- lapply(
-                    seq_len(length(parList)),
-                    function(k) {
-                        ## Initialize lists
-                        vMod <- vErr <- rep(0, length(value))
-
-                        ## Get derivatives for model and errormodel
-                        vMod[seq_len(length(value))] <- eval(
-                            modelJacobianExpr[[k]]
-                        )
-                        vErr[seq_len(length(value))] <- eval(
-                            errorModelJacobianExpr[[k]]
-                        )
-
-                        residualDeriv <- vMod / sqrt(var) - vErr * res / var
-                        varianceDeriv <- vErr * 2 * sqrt(var)
-                        list(residualDeriv, varianceDeriv)
-                    }
-                )
-
-                residualDeriv <- lapply(jac, function(j) j[[1]])
-                varianceDeriv <- lapply(jac, function(j) j[[2]])
-            }
-            attr(residuals, "residualDeriv") <- residualDeriv
-            attr(residuals, "varianceDeriv") <- varianceDeriv
-
-            return(residuals)
-        }
-    )
+      return(residuals)
+    }
+  )
 }
 
 
@@ -1354,111 +1415,127 @@ rssModel <- function(parList,
 #'
 #' @noRd
 objFunction <- function(currentPars,
-                               passParList,
-                               passParList2,
-                               calcDeriv = TRUE) {
-    if (FALSE) {
-        currentPars <- initPars
-        calcDeriv <- TRUE
-    }
+                        passParList,
+                        passParList2,
+                        calcDeriv = TRUE) {
+  if (FALSE) {
+    currentPars <- initPars
+    calcDeriv <- TRUE
+  }
 
-    parameters <- passParList$parameters
-    fitLogscale <- passParList$fitLogscale
-    constStrength <- passParList$constStrength
+  parameters <- passParList$parameters
+  fitLogscale <- passParList$fitLogscale
+  constStrength <- passParList$constStrength
 
-    dataFit <- passParList2$dataFit
-    levelsList <- passParList2$levelsList
-    mask <- passParList2$mask
+  dataFit <- passParList2$dataFit
+  levelsList <- passParList2$levelsList
+  mask <- passParList2$mask
 
-    noData <- nrow(dataFit)
+  noData <- nrow(dataFit)
 
-    ## Recover residuals from output of res_fn()
-    calculatedResiduals <- resolveFunction(
-        currentPars = currentPars,
-        passParList = passParList,
-        passParList2 = passParList2,
-        calcDeriv = calcDeriv
-    )$residuals
+  ## Recover residuals from output of res_fn()
+  calculatedResiduals <- resolveFunction(
+    currentPars = currentPars,
+    passParList = passParList,
+    passParList2 = passParList2,
+    calcDeriv = calcDeriv
+  )$residuals
 
-    ## Retrieve residuals of model, errormodel and constraint as well as
-    ## the derivatives.
-    residuals <- calculatedResiduals[1:noData]
-    variances <- calculatedResiduals[seq((noData + 1), (2 * noData))]
-    constraint <- calculatedResiduals[2 * noData + 1]
-    residualDeriv <- attr(calculatedResiduals, "residualDeriv")
-    varianceDeriv <- attr(calculatedResiduals, "varianceDeriv")
+  ## Retrieve residuals of model, errormodel and constraint as well as
+  ## the derivatives.
+  residuals <- calculatedResiduals[1:noData]
+  variances <- calculatedResiduals[seq((noData + 1), (2 * noData))]
+  constraint <- calculatedResiduals[2 * noData + 1]
+  residualDeriv <- attr(calculatedResiduals, "residualDeriv")
+  varianceDeriv <- attr(calculatedResiduals, "varianceDeriv")
 
-    ## Set bessel correction factor to 1
-    bessel <- 1
+  ## Set bessel correction factor to 1
+  bessel <- 1
 
-    ## Calculate the current value
-    value <- sum(residuals^2) + bessel * sum(log(pi * variances)) + constraint^2
+  ## Calculate the current value
+  value <- sum(residuals^2) + bessel * sum(log(pi * variances)) + constraint^2
+  gradient <- NULL
+  hessian <- NULL
+
+  ## Get derivatives for the measurements by applying the predefined mask
+  if (calcDeriv) {
+    calculatedResidualsJacobian <- do.call(cbind, lapply(
+      seq_along(currentPars),
+      function(k) {
+
+        ## Get the "class" (fixed, latent, or error) of the current k'th
+        ## parameter
+        whichPar <- match(getParClass(currentPars)[k], parameters)
+
+        ## Apply the mask to the residuals
+        residualJacobian <- residualDeriv[[whichPar]] * mask[[k]]
+        varianceJacobian <- varianceDeriv[[whichPar]] * mask[[k]]
+        constrainJacobian <- as.numeric(
+          getParClass(currentPars)[k] == parameters["biological"]
+        ) * constStrength / length(levelsList[[1]])
+
+        ## Convert to log if wanted
+        if (fitLogscale == TRUE) {
+          constrainJacobian <- constrainJacobian *
+            exp(currentPars[k])
+        }
+
+        ## Stitch the results together
+        c(residualJacobian, varianceJacobian, constrainJacobian)
+      }
+    ))
+
+    ## Split the above list into corresponding parts
+    residualJacobian <- calculatedResidualsJacobian[
+      1:noData, ,
+      drop = FALSE
+    ]
+    jacVars <- calculatedResidualsJacobian[
+      (noData + 1):(2 * noData), ,
+      drop = FALSE
+    ]
+    constrainJacobian <- calculatedResidualsJacobian[
+      2 * noData + 1, ,
+      drop = FALSE
+    ]
+
+    ## Compose to gradient vector and hessian matrix
+    gradient <- as.vector(
+      2 * residuals %*% residualJacobian + (bessel / variances) %*%
+        jacVars + 2 * constraint * constrainJacobian
+    )
+    hessian <- 2 * t(rbind(residualJacobian, constrainJacobian)) %*%
+      (rbind(residualJacobian, constrainJacobian))
+  }
+
+  ## Takes residual (ultimative res <- prediction - value and res / sqrt(var)
+  ## from rssModel()) to retrive the presdiction
+  prediction <- residuals * sqrt(variances) + dataFit$value
+
+  ## Calculate errors
+  sigma <- sqrt(variances)
+
+  ## Guard against non-finite objective/derivatives at extreme trial points.
+  ## On log-scale parameters trust() probes points where exp() (in the model
+  ## or the error model) overflows to Inf, yielding Inf/NaN value, gradient or
+  ## hessian. trust::check.objfun.output() aborts the whole fit on an NA/NaN
+  ## value, but tolerates a (+Inf) value in minimization - in that case it
+  ## simply rejects the step and shrinks the trust region. Reporting Inf here
+  ## therefore lets the optimizer back off from the overflow region instead of
+  ## crashing on a single bad probe.
+  badDeriv <- calcDeriv &&
+    (any(!is.finite(gradient)) || any(!is.finite(hessian)))
+  if (!is.finite(value) || badDeriv) {
+    value <- Inf
     gradient <- NULL
     hessian <- NULL
+  }
 
-    ## Get derivatives for the measurements by applying the predefined mask
-    if (calcDeriv) {
-        calculatedResidualsJacobian <- do.call(cbind, lapply(
-            seq_along(currentPars),
-            function(k) {
-
-                ## Get the "class" (fixed, latent, or error) of the current k'th
-                ## parameter
-                whichPar <- match(getParClass(currentPars)[k], parameters)
-
-                ## Apply the mask to the residuals
-                residualJacobian <- residualDeriv[[whichPar]] * mask[[k]]
-                varianceJacobian <- varianceDeriv[[whichPar]] * mask[[k]]
-                constrainJacobian <- as.numeric(
-                    getParClass(currentPars)[k] == parameters["biological"]
-                ) * constStrength / length(levelsList[[1]])
-
-                ## Convert to log if wanted
-                if (fitLogscale == TRUE) {
-                    constrainJacobian <- constrainJacobian *
-                        exp(currentPars[k])
-                }
-
-                ## Stitch the results together
-                c(residualJacobian, varianceJacobian, constrainJacobian)
-            }
-        ))
-
-        ## Split the above list into corresponding parts
-        residualJacobian <- calculatedResidualsJacobian[
-            1:noData, ,
-            drop = FALSE
-        ]
-        jacVars <- calculatedResidualsJacobian[
-            (noData + 1):(2 * noData), ,
-            drop = FALSE
-        ]
-        constrainJacobian <- calculatedResidualsJacobian[
-            2 * noData + 1, ,
-            drop = FALSE
-        ]
-
-        ## Compose to gradient vector and hessian matrix
-        gradient <- as.vector(
-            2 * residuals %*% residualJacobian + (bessel / variances) %*%
-                jacVars + 2 * constraint * constrainJacobian
-        )
-        hessian <- 2 * t(rbind(residualJacobian, constrainJacobian)) %*%
-            (rbind(residualJacobian, constrainJacobian))
-    }
-
-    ## Takes residual (ultimative res <- prediction - value and res / sqrt(var)
-    ## from rssModel()) to retrive the presdiction
-    prediction <- residuals * sqrt(variances) + dataFit$value
-
-    ## Calculate errors
-    sigma <- sqrt(variances)
-
-    ## Compose all of the above to one list
-    list(
-        value = value, gradient = gradient, hessian = hessian,
-        prediction = prediction, sigma = sigma
-    )
+  ## Compose all of the above to one list
+  list(
+    value = value, gradient = gradient, hessian = hessian,
+    prediction = prediction, sigma = sigma
+  )
 }
 
 
@@ -1497,33 +1574,33 @@ objFunction <- function(currentPars,
 #' @noRd
 
 evaluateModel <- function(initPars,
-                           parList,
-                           passParList,
-                           passParList2) {
-    ## Create a list with with values from 1 to the number of parameters
+                          parList,
+                          passParList,
+                          passParList2) {
+  ## Create a list with with values from 1 to the number of parameters
 
-    effectsPars <- passParList$effectsPars
-    modelExpr <- passParList$modelExpr
-    dataFit <- passParList2$dataFit
-
-
+  effectsPars <- passParList$effectsPars
+  modelExpr <- passParList$modelExpr
+  dataFit <- passParList2$dataFit
 
 
-    biological <- seq_along(initPars)
 
-    ## Generate a list with the entries:
-    ##   parameters, the sequence saved generated as "fixed", name, time,
-    ##   value, sigma, fixed, latent, error, ys, sj, sigmaR
-    useList <- c(
-        list(initPars, biological = biological),
-        as.list(dataFit),
-        parList
-    )
-    names(useList)[1] <- effectsPars[[1]][1]
 
-    values <- with(useList, eval(modelExpr) - dataFit$value)
+  biological <- seq_along(initPars)
 
-    return(values)
+  ## Generate a list with the entries:
+  ##   parameters, the sequence saved generated as "fixed", name, time,
+  ##   value, sigma, fixed, latent, error, ys, sj, sigmaR
+  useList <- c(
+    list(initPars, biological = biological),
+    as.list(dataFit),
+    parList
+  )
+  names(useList)[1] <- effectsPars[[1]][1]
+
+  values <- with(useList, eval(modelExpr) - dataFit$value)
+
+  return(values)
 }
 
 
@@ -1563,24 +1640,24 @@ evaluateModel <- function(initPars,
 #'
 
 evaluateModelJacobian <- function(initPars,
-                                    parList,
-                                    passParList,
-                                    passParList2) {
-    effectsPars <- passParList$effectsPars
-    modelDerivExpr <- passParList$modelDerivExpr
+                                  parList,
+                                  passParList,
+                                  passParList2) {
+  effectsPars <- passParList$effectsPars
+  modelDerivExpr <- passParList$modelDerivExpr
 
-    dataFit <- passParList2$dataFit
+  dataFit <- passParList2$dataFit
 
 
-    biological <- seq_along(initPars)
-    useList <- c(
-        list(initPars, biological = biological), as.list(dataFit),
-        parList
-    )
-    names(useList)[1] <- effectsPars[[1]][1]
-    derivative_values <- with(useList, eval(modelDerivExpr))
+  biological <- seq_along(initPars)
+  useList <- c(
+    list(initPars, biological = biological), as.list(dataFit),
+    parList
+  )
+  names(useList)[1] <- effectsPars[[1]][1]
+  derivative_values <- with(useList, eval(modelDerivExpr))
 
-    return(derivative_values)
+  return(derivative_values)
 }
 
 
@@ -1599,43 +1676,43 @@ evaluateModelJacobian <- function(initPars,
 #'
 #' @noRd
 getMaxY <- function(x) {
-    rx <- round(x, 1)
-    lower <- floor(x)
-    upper <- ceiling(x)
-    lowDiff <- rx - lower
-    uppDiff <- upper - rx
+  rx <- round(x, 1)
+  lower <- floor(x)
+  upper <- ceiling(x)
+  lowDiff <- rx - lower
+  uppDiff <- upper - rx
 
-    if (x > 5) {
-        if (upper %% 2 == 0) {
-            out <- upper
-        } else {
-            out <- lower + 1
-        }
+  if (x > 5) {
+    if (upper %% 2 == 0) {
+      out <- upper
     } else {
-        if (x < 2) {
-            if (rx > x) {
-                if (rx %% 0.2 == 0) {
-                    out <- rx
-                } else {
-                    out <- rx + 0.1
-                }
-            } else {
-                if (rx %% 0.2 != 0) {
-                    out <- rx + 0.1
-                } else {
-                    out <- rx + 0.2
-                }
-            }
-        } else {
-            if (lowDiff < uppDiff) {
-                out <- lower + 0.5
-            } else {
-                out <- upper
-            }
-        }
+      out <- lower + 1
     }
+  } else {
+    if (x < 2) {
+      if (rx > x) {
+        if (rx %% 0.2 == 0) {
+          out <- rx
+        } else {
+          out <- rx + 0.1
+        }
+      } else {
+        if (rx %% 0.2 != 0) {
+          out <- rx + 0.1
+        } else {
+          out <- rx + 0.2
+        }
+      }
+    } else {
+      if (lowDiff < uppDiff) {
+        out <- lower + 0.5
+      } else {
+        out <- upper
+      }
+    }
+  }
 
-    return(out)
+  return(out)
 }
 
 
@@ -1651,31 +1728,31 @@ getMaxY <- function(x) {
 #'
 #' @noRd
 scaleValues <- function(fitLogscale,
-                         outputScale,
-                         value,
-                         upper,
-                         lower,
-                         sigma) {
-    if (fitLogscale == TRUE) {
-        value <- exp(value)
-        upper <- exp(upper)
-        lower <- exp(lower)
-        sigma <- value * sigma
-    } else {
-        value <- value
-        upper <- upper
-        lower <- lower
-        sigma <- sigma
-    }
+                        outputScale,
+                        value,
+                        upper,
+                        lower,
+                        sigma) {
+  if (fitLogscale == TRUE) {
+    value <- exp(value)
+    upper <- exp(upper)
+    lower <- exp(lower)
+    sigma <- value * sigma
+  } else {
+    value <- value
+    upper <- upper
+    lower <- lower
+    sigma <- sigma
+  }
 
-    upper <- value + sigma
-    lower <- value - sigma
-
-
+  upper <- value + sigma
+  lower <- value - sigma
 
 
 
-    return(list(value = value, upper = upper, lower = lower, sigma = sigma))
+
+
+  return(list(value = value, upper = upper, lower = lower, sigma = sigma))
 }
 
 
@@ -1691,5 +1768,5 @@ scaleValues <- function(fitLogscale,
 #'
 #' @noRd
 getParClass <- function(paramlist) {
-    classes <- gsub('[_0-9]+', '', names(paramlist))
+  classes <- gsub('[_0-9]+', '', names(paramlist))
 }
