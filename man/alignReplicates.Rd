@@ -103,6 +103,11 @@ precedence.}
     (default \code{sqrt(.Machine$double.eps)}).}
   \item{\code{mterm}}{Convergence tolerance for step size
     (default \code{sqrt(.Machine$double.eps)}).}
+  \item{\code{structuredThreshold}}{Parameter count above which a target is
+    fit with the sparse, structure-exploiting optimizer instead of the dense
+    kernel (default \code{5000}). The sparse path avoids the dense
+    \eqn{nPars \times nPars} Hessian and makes fits with up to
+    \eqn{\sim 10^6} parameters (dense time-course alignment) feasible.}
 }
 Any entries not supplied use the defaults above.}
 

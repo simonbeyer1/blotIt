@@ -161,46 +161,49 @@ paste_ <- function(...) paste(..., sep = "_")
 #' @noRd
 
 analyzeBlocks <- function(blockMatrix) {
-  out <- which(apply(blockMatrix, 1, sum) == 0)
+  out <- which(rowSums(blockMatrix) == 0)
   if (length(out) > 0) {
-    blockMatrix <- blockMatrix[-out, ]
+    blockMatrix <- blockMatrix[-out, , drop = FALSE]
     cat("matrix contains zero rows which have been eliminated\n")
   }
 
-  noUniqueBiological <- dim(blockMatrix)[1]
-  rComponents <- list()
-  cComponents <- list()
+  nR <- nrow(blockMatrix)
+  nC <- ncol(blockMatrix)
 
-  counter <- 0
-  while (length(unlist(rComponents)) < noUniqueBiological) {
-    counter <- counter + 1
+  ## Connected components of the bipartite (row <-> column) graph via union-find:
+  ## nodes 1..nR are rows, nR+1..nR+nC are columns, each non-zero entry an edge.
+  ## Runs in O(nnz * alpha(n)).
+  edges <- which(blockMatrix == 1, arr.ind = TRUE)
+  parent <- seq_len(nR + nC)
 
-    if (length(unlist(rComponents)) == 0) {
-      w <- 1
-    } else {
-      my_sample <- (1:noUniqueBiological)[-unlist(rComponents)]
-      w <- min(my_sample)
+  findRoot <- function(x) {
+    root <- x
+    while (parent[root] != root) root <- parent[root]
+    ## path halving
+    while (parent[x] != root) {
+      nxt <- parent[x]
+      parent[x] <<- root
+      x <- nxt
     }
-
-    repeat {
-      v <- unique(
-        rapply(
-          as.list(w),
-          function(i) which(blockMatrix[i, ] == 1)
-        )
-      )
-      wNew <- unique(
-        rapply(
-          as.list(v),
-          function(j) which(blockMatrix[, j] == 1)
-        )
-      )
-      if (length(wNew) == length(w)) break
-      w <- wNew
-    }
-    rComponents[[counter]] <- w
-    cComponents[[counter]] <- v
+    root
   }
+
+  for (e in seq_len(nrow(edges))) {
+    ra <- findRoot(edges[e, 1L])
+    rb <- findRoot(edges[e, 2L] + nR)
+    if (ra != rb) parent[ra] <- rb
+  }
+
+  ## Group the row nodes by component root.
+  rowRoots <- vapply(seq_len(nR), findRoot, integer(1))
+
+  ## Preserve the original output convention: one entry per component, rows
+  ## sorted ascending, components ordered by their smallest row index.
+  rowOrder <- order(rowRoots, seq_len(nR))
+  splitRoots <- rowRoots[rowOrder]
+  rComponents <- split(rowOrder, splitRoots)
+  rComponents <- rComponents[order(vapply(rComponents, min, integer(1)))]
+  names(rComponents) <- NULL
 
   return(rComponents)
 }
@@ -249,13 +252,11 @@ splitForScaling <- function(data,
     nrow = length(biologicalStringsUnique)
   )
 
-  ## For every datapoint set the entry in the matrix to 1, corresponding to the
-  ## index in the respective unique lists of fixed (row) and specific (col)
-  for (i in seq_len(nrow(data))) {
-    useRow <- which(biologicalStringsUnique == biologicalStrings[i])
-    useCol <- which(scalingStringsUnique == scalingStrings[i])
-    blockMatrix[useRow, useCol] <- 1
-  }
+  ## Mark blockMatrix[bio, scaling] = 1 for every datapoint, mapping each row to
+  ## its unique biological (row) and scaling (column) index via match(). O(noData).
+  rowIdx <- match(biologicalStrings, biologicalStringsUnique)
+  colIdx <- match(scalingStrings, scalingStringsUnique)
+  blockMatrix[cbind(rowIdx, colIdx)] <- 1
 
   ## compile list of scalings
   scalingsList <- analyzeBlocks(blockMatrix)
@@ -375,6 +376,93 @@ inputCheck <- function(data = NULL,
 
   returnMsg <- "All input checks passed."
   return(returnMsg)
+}
+
+
+
+# structuredDiagInverse() ------------------------------------------------
+
+#' Diagonal of the inverse of an arrow + rank-1 Hessian
+#'
+#' For the large-parameter path the full Hessian is
+#' \eqn{H = H_{\mathrm{GN}} + 2\,vv^{\top}} with \eqn{v = }\code{constrVec}.
+#' \code{scaleTarget} needs \eqn{\mathrm{diag}(H^{-1})} for the parameter
+#' uncertainties, but \eqn{H} is far too large to invert densely
+#' (\code{MASS::ginv}, as used in the small path). It is, however, an arrow
+#' matrix: the biological block of \eqn{H_{\mathrm{GN}}} is diagonal (no two
+#' biological levels share a data point) and is bordered by only a handful of
+#' scaling/error parameters, with the constraint a rank-1 update on the
+#' biological block. This routine exploits that structure to return the exact
+#' diagonal of \eqn{H^{-1}} in \eqn{O(nPars \cdot m^2)} time and
+#' \eqn{O(nPars \cdot m)} memory (\eqn{m} = number of border parameters).
+#'
+#' Block form with P the biological block, M the border block and C the coupling:
+#' \deqn{H = \begin{pmatrix} P & C \\ C^{\top} & M \end{pmatrix},\quad
+#'       P = D_b + 2 v_b v_b^{\top}.}
+#' The diagonal of the inverse follows from the block-inverse / Schur-complement
+#' identities, with \eqn{P^{-1}} handled by Sherman-Morrison (diagonal + rank-1).
+#'
+#' @param Hgn sparse symmetric Gauss-Newton Hessian (the \code{hessian} returned
+#'   by \code{objFunction(sparseHessian = TRUE)}).
+#' @param constrVec rank-1 constraint vector (non-zero on biological parameters).
+#' @param bioIdx,borderIdx integer indices partitioning the parameters into the
+#'   diagonal biological block and the dense border.
+#'
+#' @return numeric vector \eqn{\mathrm{diag}(H^{-1})}, or \code{NULL} if the
+#'   biological block is not diagonal (unsupported structure).
+#'
+#' @noRd
+structuredDiagInverse <- function(Hgn, constrVec, bioIdx, borderIdx) {
+  n <- nrow(Hgn)
+  Hbb <- Hgn[bioIdx, bioIdx, drop = FALSE]
+  if (!Matrix::isDiagonal(Hbb)) {
+    return(NULL)
+  }
+
+  Db <- as.numeric(Matrix::diag(Hgn))[bioIdx]
+  ## Guard against zero/negative curvature (regularize minimally).
+  posScale <- max(Db[is.finite(Db)], na.rm = TRUE)
+  floorVal <- sqrt(.Machine$double.eps) * max(posScale, 1)
+  Db <- pmax(Db, floorVal)
+  DbInv <- 1 / Db
+
+  vb <- if (is.null(constrVec)) numeric(length(bioIdx)) else constrVec[bioIdx]
+
+  ## P^{-1} for P = diag(Db) + 2 vb vb' (Sherman-Morrison).
+  z <- DbInv * vb
+  denom <- 1 + 2 * sum(vb * z)
+  diagPinv <- DbInv - 2 * z^2 / denom
+
+  m <- length(borderIdx)
+  if (m == 0) {
+    out <- numeric(n)
+    out[bioIdx] <- diagPinv
+    return(out)
+  }
+
+  C <- Hgn[bioIdx, borderIdx, drop = FALSE]                 # n_b x m (sparse)
+  Mb <- as.matrix(Hgn[borderIdx, borderIdx, drop = FALSE])  # m x m (dense)
+
+  ## P^{-1} C = diag(DbInv) C - (2/denom) z (z' C)
+  zC <- as.numeric(Matrix::crossprod(z, C))                 # length m
+  W <- as.matrix(Matrix::Diagonal(x = DbInv) %*% C) -
+    (2 / denom) * outer(z, zC)                              # n_b x m (dense)
+
+  ## Schur complement Sc = M - C' P^{-1} C and its (regularized) inverse.
+  Sc <- Mb - as.matrix(Matrix::crossprod(C, W))
+  ScInv <- tryCatch(solve(Sc), error = function(e) {
+    ridge <- sqrt(.Machine$double.eps) * max(abs(diag(Sc)), 1)
+    solve(Sc + diag(ridge, m))
+  })
+
+  ## diag(H^{-1}): biological block = diag(P^{-1}) + rowwise quadratic form in Sc^{-1}
+  WS <- W %*% ScInv
+  diagBio <- diagPinv + rowSums(WS * W)
+
+  out <- numeric(n)
+  out[bioIdx] <- diagBio
+  out[borderIdx] <- diag(ScInv)
+  out
 }
 
 
@@ -644,31 +732,17 @@ scaleTarget <- function(currentData,
     error = unique(as.character(dataFit$error))
   )
 
-  ## Combine above lists allLevels will therefore have the length of the
-  ## sum of all different biological, scaling and error values (in that order)
-  allLevels <- unlist(
-    lapply(
-      seq_along(parameters),
-      function(k) {
-        switch(names(parameters)[k],
-               biological = levelsList[[1]],
-               scaling = levelsList[[2]],
-               error = levelsList[[3]]
-        )
-      }
-    )
-  )
-  #
   initPars <- genInitPars(
     parameters,
     fitLogscale,
     levelsList
   )
-  #
-  mask <- genMask(
-    initPars,
+
+  ## Sparse, allocation-light replacement for genMask(): one integer index
+  ## vector per model symbol instead of nPars dense 0/1 vectors of length noData.
+  maskIdx <- buildMaskIndex(
     parameters,
-    allLevels,
+    levelsList,
     dataFit
   )
 
@@ -683,11 +757,26 @@ scaleTarget <- function(currentData,
     levelsList = levelsList,
     fitParsBiological = fitParsBiological,
     effectsPars = effectsPars,
-    mask = mask,
+    maskIdx = maskIdx,
     initPars = initPars
   )
 
   # * call of trust() function ----------------------------------------------
+
+  ## Use the sparse, structure-exploiting optimizer once the parameter count
+  ## makes a dense K x K Hessian / eigensolve too large; otherwise the dense
+  ## C++ kernel.
+  nPars <- length(initPars)
+  structuredThreshold <- if (!is.null(optControls$structuredThreshold)) {
+    optControls$structuredThreshold
+  } else {
+    5000L
+  }
+  useStructured <- nPars > structuredThreshold
+  passParList$sparseHessian <- useStructured
+  if (useStructured && verbose) {
+    cat("Using sparse structured optimizer (", nPars, " parameters).\n", sep = "")
+  }
 
   ## Build trust() arguments from optControls
   trustArgs <- list(
@@ -699,6 +788,7 @@ scaleTarget <- function(currentData,
     fterm     = optControls$fterm,
     mterm     = optControls$mterm,
     blather   = verbose,
+    structured = useStructured,
     passParList  = passParList,
     passParList2 = passParList2
   )
@@ -749,13 +839,45 @@ scaleTarget <- function(currentData,
                        normalize)
   )
 
-  ## Get singular values for diagnostic purposes
-  singleValues <- svd(fitResult[["hessian"]])[["d"]]
-  tol <- sqrt(.Machine$double.eps)
-  nonIdentifiable <- which(singleValues < tol * singleValues[1])
-  if (length(nonIdentifiable) > 0 && verbose) {
-    cat("Note: ", length(nonIdentifiable),
-        " eigenvalue(s) of Hessian below tolerance.\n")
+  ## Singular-value diagnostic (dense path only; a dense SVD is infeasible at
+  ## the parameter counts of the structured path).
+  if (!isTRUE(passParList$sparseHessian)) {
+    singleValues <- svd(fitResult[["hessian"]])[["d"]]
+    tol <- sqrt(.Machine$double.eps)
+    nonIdentifiable <- which(singleValues < tol * singleValues[1])
+    if (length(nonIdentifiable) > 0 && verbose) {
+      cat("Note: ", length(nonIdentifiable),
+          " eigenvalue(s) of Hessian below tolerance.\n")
+    }
+  }
+
+  ## Diagonal of (twice) the inverse Fisher information, used below for every
+  ## parameter sigma. Small path: dense pseudo-inverse (MASS::ginv). Large path:
+  ## structured arrow + rank-1 diagonal-of-inverse, which never forms the dense
+  ## nPars x nPars matrix.
+  if (isTRUE(passParList$sparseHessian)) {
+    effects <- names(parameters)
+    nlevPar <- vapply(effects, function(e) length(levelsList[[e]]), integer(1))
+    offs <- cumsum(c(0L, nlevPar))[seq_along(parameters)]
+    bioIdx <- unlist(lapply(
+      which(effects == "biological"),
+      function(k) as.integer(offs[k]) + seq_len(nlevPar[k])
+    ))
+    borderIdx <- setdiff(seq_len(length(initPars)), bioIdx)
+    diagInv <- structuredDiagInverse(
+      Hgn = fitResult$hessian,
+      constrVec = fitResult$constrVec,
+      bioIdx = bioIdx,
+      borderIdx = borderIdx
+    )
+    if (is.null(diagInv)) {
+      stop("Structured diagonal-of-inverse failed: the biological Hessian ",
+           "block is not diagonal (model has multiple biological parameters?). ",
+           "The large-parameter path supports a single biological parameter.")
+    }
+    diag2Inv <- 2 * diagInv
+  } else {
+    diag2Inv <- diag(2 * MASS::ginv(fitResult$hessian))
   }
 
   # * parameter table -------------------------------------------------------
@@ -781,9 +903,7 @@ scaleTarget <- function(currentData,
   ## Calculating the error from the inverse of the Fisher information
   ## matrix which is in this case the Hessian, to which the above
   ## calculated Bessel correction is applied.
-  parTable$sigma <- as.numeric(
-    sqrt(diag(2 * MASS::ginv(fitResult$hessian)))
-  ) * bessel
+  parTable$sigma <- sqrt(diag2Inv) * bessel
 
 
 
@@ -973,9 +1093,7 @@ scaleTarget <- function(currentData,
     )
   )
 
-  outAligned$sigma <- as.numeric(
-    sqrt(diag(2 * MASS::ginv(fitResult$hessian)))
-  )[seq_len(noInitial)] * bessel
+  outAligned$sigma <- sqrt(diag2Inv)[seq_len(noInitial)] * bessel
 
   # transform parameters back if fitted on log scale
   if (fitLogscale == TRUE) {
@@ -1143,6 +1261,71 @@ genMask <- function(initPars,
   )
 
   return(mask)
+}
+
+
+
+# buildMaskIndex() --------------------------------------------------------
+
+#' Index-based parameter activation map
+#'
+#' Each data point activates exactly one parameter per model symbol (its
+#' biological, scaling and error level). \code{buildMaskIndex} encodes this as
+#' one integer index vector per symbol (length \code{noData}) holding the global
+#' parameter index activated by each data point, so the objective assembles its
+#' gradient and Hessian in \eqn{O(noData \cdot nSymbols)}. \link{genMask} encodes
+#' the same information as \eqn{nPars} dense 0/1 vectors, which is
+#' \eqn{O(noData \cdot nPars)} and infeasible at large \code{nPars}.
+#'
+#' The parameter ordering follows \link{genInitPars}: symbols are concatenated in
+#' the order of \code{parameters}, each symbol contributing one parameter per
+#' level in \code{levelsList[[effect]]}.
+#'
+#' @param parameters named vector mapping model symbols (e.g. "yi") to their
+#'   effect class via the names ("biological"/"scaling"/"error").
+#' @param levelsList named list with one character vector of levels per effect.
+#' @param dataFit data frame with the pasted effect columns "biological",
+#'   "scaling" and "error".
+#'
+#' @return list with entries \code{gidx} (list of integer index vectors, one per
+#'   symbol), \code{nPars}, \code{constrIdx} (global indices of the first
+#'   biological symbol's parameters, which carry the normalization constraint)
+#'   and \code{constrDenom} (number of biological levels).
+#'
+#' @noRd
+buildMaskIndex <- function(parameters, levelsList, dataFit) {
+  S <- length(parameters)
+  effects <- names(parameters)
+  nlev <- vapply(effects, function(e) length(levelsList[[e]]), integer(1))
+  offsets <- cumsum(c(0L, nlev))[seq_len(S)]
+  nPars <- sum(nlev)
+
+  ## For each symbol, the global parameter index activated by each data point.
+  gidx <- lapply(
+    seq_len(S),
+    function(k) {
+      as.integer(offsets[k]) +
+        match(as.character(dataFit[[effects[k]]]), levelsList[[effects[k]]])
+    }
+  )
+
+  ## The normalization constraint acts on the first biological symbol only; its
+  ## per-parameter weight is constStrength / (number of biological levels).
+  firstBio <- which(effects == "biological")[1]
+  if (!is.na(firstBio)) {
+    constrIdx <- as.integer(offsets[firstBio]) + seq_len(nlev[firstBio])
+    constrDenom <- nlev[firstBio]
+  } else {
+    constrIdx <- integer(0)
+    constrDenom <- 1L
+  }
+
+  list(
+    gidx = gidx,
+    nPars = nPars,
+    constrIdx = constrIdx,
+    constrDenom = constrDenom
+  )
 }
 
 
@@ -1456,56 +1639,73 @@ objFunction <- function(currentPars,
   value <- sum(residuals^2) + bessel * sum(log(pi * variances)) + constraint^2
   gradient <- NULL
   hessian <- NULL
+  constrVec <- NULL
+  sparseHessian <- isTRUE(passParList$sparseHessian)
 
-  ## Get derivatives for the measurements by applying the predefined mask
+  ## Derivatives via the sparse parameter-index structure (see buildMaskIndex):
+  ## every data point activates exactly one parameter per model symbol, so the
+  ## gradient is a set of segment sums and the Gauss-Newton Hessian a sparse
+  ## crossproduct, never a dense (2*noData) x nPars Jacobian. Cost
+  ## O(noData * nSymbols).
   if (calcDeriv) {
-    calculatedResidualsJacobian <- do.call(cbind, lapply(
-      seq_along(currentPars),
-      function(k) {
+    maskIdx <- passParList2$maskIdx
+    if (is.null(maskIdx)) {
+      ## Rebuild the index structure from the levels when not supplied.
+      maskIdx <- buildMaskIndex(parameters, levelsList, dataFit)
+    }
 
-        ## Get the "class" (fixed, latent, or error) of the current k'th
-        ## parameter
-        whichPar <- match(getParClass(currentPars)[k], parameters)
+    nPars <- length(currentPars)
+    S <- length(parameters)
+    gidx <- maskIdx$gidx
 
-        ## Apply the mask to the residuals
-        residualJacobian <- residualDeriv[[whichPar]] * mask[[k]]
-        varianceJacobian <- varianceDeriv[[whichPar]] * mask[[k]]
-        constrainJacobian <- as.numeric(
-          getParClass(currentPars)[k] == parameters["biological"]
-        ) * constStrength / length(levelsList[[1]])
+    ## --- Gradient: segment sums per symbol --------------------------------
+    ## Per data point i the contribution to its active parameter of symbol k is
+    ##   2 * residual_i * dResidual_i  +  (1/variance_i) * dVariance_i
+    ## (the residual term and the log-variance term from the original
+    ## `2 * residuals %*% residualJacobian + (1/variances) %*% jacVars`).
+    gradient <- numeric(nPars)
+    for (k in seq_len(S)) {
+      contrib <- 2 * residuals * residualDeriv[[k]] +
+        (bessel / variances) * varianceDeriv[[k]]
+      acc <- rowsum(contrib, gidx[[k]], reorder = FALSE)
+      idx <- as.integer(rownames(acc))
+      gradient[idx] <- gradient[idx] + acc[, 1L]
+    }
 
-        ## Convert to log if wanted
-        if (fitLogscale == TRUE) {
-          constrainJacobian <- constrainJacobian *
-            exp(currentPars[k])
-        }
+    ## --- Constraint gradient: first biological symbol only ----------------
+    cj <- numeric(nPars)
+    ci <- maskIdx$constrIdx
+    if (length(ci)) {
+      cjVal <- constStrength / maskIdx$constrDenom
+      if (fitLogscale == TRUE) cjVal <- cjVal * exp(currentPars[ci])
+      cj[ci] <- cjVal
+      gradient <- gradient + 2 * constraint * cj
+    }
 
-        ## Stitch the results together
-        c(residualJacobian, varianceJacobian, constrainJacobian)
-      }
-    ))
-
-    ## Split the above list into corresponding parts
-    residualJacobian <- calculatedResidualsJacobian[
-      1:noData, ,
-      drop = FALSE
-    ]
-    jacVars <- calculatedResidualsJacobian[
-      (noData + 1):(2 * noData), ,
-      drop = FALSE
-    ]
-    constrainJacobian <- calculatedResidualsJacobian[
-      2 * noData + 1, ,
-      drop = FALSE
-    ]
-
-    ## Compose to gradient vector and hessian matrix
-    gradient <- as.vector(
-      2 * residuals %*% residualJacobian + (bessel / variances) %*%
-        jacVars + 2 * constraint * constrainJacobian
+    ## --- Hessian: 2 * ( t(Rj) Rj + outer(constraintRow) ) -----------------
+    ## Rj (noData x nPars) has exactly S non-zeros per row, at the active
+    ## parameter of each symbol; assemble it sparsely and take the crossproduct.
+    residualJacobian <- Matrix::sparseMatrix(
+      i = rep.int(seq_len(noData), S),
+      j = unlist(gidx, use.names = FALSE),
+      x = unlist(residualDeriv[seq_len(S)], use.names = FALSE),
+      dims = c(noData, nPars)
     )
-    hessian <- 2 * t(rbind(residualJacobian, constrainJacobian)) %*%
-      (rbind(residualJacobian, constrainJacobian))
+    gnHessian <- 2 * Matrix::crossprod(residualJacobian)
+
+    if (sparseHessian) {
+      ## Keep the Gauss-Newton Hessian sparse and return the rank-1 constraint
+      ## coupling separately. Full Hessian = gnHessian + 2 * tcrossprod(constrVec).
+      hessian <- gnHessian
+      constrVec <- cj
+    } else {
+      ## Dense Hessian for the C++ trust kernel; add the rank-1 constraint only
+      ## on the biological sub-block to avoid a dense nPars x nPars outer product.
+      hessian <- as.matrix(gnHessian)
+      if (length(ci)) {
+        hessian[ci, ci] <- hessian[ci, ci] + 2 * outer(cj[ci], cj[ci])
+      }
+    }
   }
 
   ## Takes residual (ultimative res <- prediction - value and res / sqrt(var)
@@ -1523,18 +1723,26 @@ objFunction <- function(currentPars,
   ## simply rejects the step and shrinks the trust region. Reporting Inf here
   ## therefore lets the optimizer back off from the overflow region instead of
   ## crashing on a single bad probe.
-  badDeriv <- calcDeriv &&
-    (any(!is.finite(gradient)) || any(!is.finite(hessian)))
+  hessianFinite <- if (is.null(hessian)) {
+    TRUE
+  } else if (sparseHessian) {
+    all(is.finite(hessian@x)) && all(is.finite(constrVec))
+  } else {
+    all(is.finite(hessian))
+  }
+  badDeriv <- calcDeriv && (any(!is.finite(gradient)) || !hessianFinite)
   if (!is.finite(value) || badDeriv) {
     value <- Inf
     gradient <- NULL
     hessian <- NULL
+    constrVec <- NULL
   }
 
-  ## Compose all of the above to one list
+  ## Compose all of the above to one list. constrVec is non-NULL only in the
+  ## sparse-Hessian path, where it carries the rank-1 normalization coupling.
   list(
     value = value, gradient = gradient, hessian = hessian,
-    prediction = prediction, sigma = sigma
+    constrVec = constrVec, prediction = prediction, sigma = sigma
   )
 }
 

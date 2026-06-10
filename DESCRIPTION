@@ -23,6 +23,7 @@ Imports:
     ggplot2,
     nleqslv,
     MASS,
+    Matrix,
     reticulate,
     scales,
     Rcpp

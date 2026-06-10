@@ -15,6 +15,7 @@ trust(
   mterm = sqrt(.Machine$double.eps),
   minimize = TRUE,
   blather = FALSE,
+  structured = FALSE,
   ...
 )
 }
@@ -41,6 +42,13 @@ and on the predicted reduction.}
 
 \item{blather}{accepted for compatibility with \code{trust::trust}; the
 iteration path is not recorded.}
+
+\item{structured}{logical; when \code{TRUE} the optimization is run by the
+sparse, structure-exploiting kernel \code{trustStructured()} instead of the
+dense C++ kernel. This is required when the number of parameters is large
+enough that a dense \eqn{K \times K} Hessian / eigensolve would not fit in
+memory. The objective must then return a sparse \code{hessian} plus the
+rank-1 \code{constrVec} (see \code{objFunction(..., sparseHessian = TRUE)}).}
 
 \item{...}{further arguments passed on to \code{objfun} at every evaluation.}
 }
