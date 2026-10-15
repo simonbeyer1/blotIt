@@ -296,3 +296,49 @@ test_that("llrTest() - checks nesting of the error effects", {
     h0 <- fitSimLog2(error = sigmaA ~ name + experiment)
     expect_error(llrTest(h0, h1), "not a special case")
 })
+
+
+# alignReplicates() - grouped t likelihood ----------------------------------------
+
+simNoisyGel <- function() {
+    set.seed(1)
+    d <- expand.grid(
+        time = seq_len(8), Exp_ = paste0("E", 1:5), stringsAsFactors = FALSE
+    )
+    d$name <- "pX"
+    d$value <- 2 * sin(d$time) + rnorm(5)[match(d$Exp_, unique(d$Exp_))] +
+        rnorm(nrow(d), 0, ifelse(d$Exp_ == "E5", 1.5, 0.1))
+    d
+}
+
+fitNoisyGel <- function(d, ...) {
+    out <- suppressWarnings(alignReplicates(
+        d, model = "yi + sj", errorModel = "exp(sigmaA)",
+        biological = yi ~ name + time, scaling = sj ~ name + Exp_,
+        error = sigmaA ~ name, normalizeInput = FALSE, fitLogscale = FALSE, ...
+    ))
+    out$aligned$value
+}
+
+test_that("alignReplicates() - tGroup down-weights a noisy gel as a whole", {
+    d <- simNoisyGel()
+    ref <- fitNoisyGel(d[d$Exp_ != "E5", ])
+    dist <- function(y) sqrt(mean((y - ref)^2))
+    distNormal <- dist(fitNoisyGel(d))
+    distT <- dist(fitNoisyGel(d, likelihood = "t"))
+    distGroup <- dist(fitNoisyGel(d, likelihood = "t", tGroup = "Exp_"))
+    expect_lt(distGroup, distT)
+    expect_lt(distGroup, distNormal)
+})
+
+test_that("alignReplicates() - tGroup of single points equals pointwise t", {
+    d <- simNoisyGel()
+    d$point <- as.character(seq_len(nrow(d)))
+    expect_equal(
+        fitNoisyGel(d, likelihood = "t", tGroup = "point"),
+        fitNoisyGel(d, likelihood = "t"),
+        tolerance = 1e-6
+    )
+    expect_error(fitNoisyGel(d, tGroup = "Exp_"), "requires likelihood")
+    expect_error(fitNoisyGel(d, likelihood = "t", tGroup = "nope"), "columns")
+})

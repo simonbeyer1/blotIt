@@ -584,7 +584,8 @@ plotIt <- function(
 #' @export
 llrTest <- function(H0, H1, check = TRUE) {
   if (!identical(H0$likelihood, H1$likelihood) ||
-      !identical(H0$likelihoodDf, H1$likelihoodDf)) {
+      !identical(H0$likelihoodDf, H1$likelihoodDf) ||
+      !identical(H0$tGroup, H1$tGroup)) {
     stop("H0 and H1 must use the same likelihood.")
   }
 

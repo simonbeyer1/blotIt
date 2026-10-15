@@ -477,6 +477,11 @@ scaleTarget <- function(currentData,
       paste_, currentData[, errorGroups[[p]], drop = FALSE]
     )
   }
+  tGroupIdx <- NULL
+  if (!is.null(passParList$tGroup)) {
+    tGroupLevels <- do.call(paste_, currentData[, passParList$tGroup, drop = FALSE])
+    tGroupIdx <- match(tGroupLevels, unique(tGroupLevels))
+  }
 
   ## Levels per effect class, named like the class columns of dataFit
   levelsList <- lapply(
@@ -515,7 +520,9 @@ scaleTarget <- function(currentData,
     levelsList = levelsList,
     effectsPars = effectsPars,
     maskIdx = maskIdx,
-    initPars = initPars
+    initPars = initPars,
+    tGroupIdx = tGroupIdx,
+    tGroupSize = if (!is.null(tGroupIdx)) tabulate(tGroupIdx)
   )
 
   # * call of trust() function ----------------------------------------------
@@ -1263,12 +1270,24 @@ objFunction <- function(currentPars,
 
   bessel <- 1
   isT <- identical(passParList$likelihood, "t")
-  if (isT) {
+  tIdx <- passParList2$tGroupIdx
+  if (isT && is.null(tIdx)) {
     nu <- passParList$df
     tConst <- log(nu * pi) - 2 * (lgamma((nu + 1) / 2) - lgamma(nu / 2))
     tWeight <- (nu + 1) / (nu + residuals^2)
+    expWeight <- (nu + 1) / (nu + 3)
     value <- (nu + 1) * sum(log1p(residuals^2 / nu)) + sum(log(variances)) +
       noData * tConst + constraint^2
+  } else if (isT) {
+    ## Multivariate t per group: one shared scale weight for all its points
+    nu <- passParList$df
+    nG <- passParList2$tGroupSize
+    Q <- as.vector(rowsum(residuals^2, tIdx, reorder = TRUE))
+    tConst <- nG * log(nu * pi) - 2 * (lgamma((nu + nG) / 2) - lgamma(nu / 2))
+    tWeight <- ((nu + nG) / (nu + Q))[tIdx]
+    expWeight <- ((nu + nG) / (nu + nG + 2))[tIdx]
+    value <- sum((nu + nG) * log1p(Q / nu)) + sum(log(variances)) +
+      sum(tConst) + constraint^2
   } else {
     value <- sum(residuals^2) + bessel * sum(log(pi * variances)) + constraint^2
   }
@@ -1321,7 +1340,7 @@ objFunction <- function(currentPars,
     jacEntries <- residualDeriv[seq_len(S)]
     if (isT) {
       hessWeight <- if (isTRUE(passParList2$expectedInfo)) {
-        (nu + 1) / (nu + 3)
+        expWeight
       } else {
         tWeight
       }

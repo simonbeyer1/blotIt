@@ -27,7 +27,8 @@ alignReplicates(
   multistartSd = 3,
   cores = 1,
   likelihood = c("normal", "t"),
-  df = 5
+  df = 5,
+  tGroup = NULL
 )
 }
 \arguments{
@@ -108,6 +109,11 @@ follows a Student-t distribution with location \code{model} and scale
 
 \item{df}{degrees of freedom of the t distribution (fixed), used only for
 \code{likelihood = "t"}.}
+
+\item{tGroup}{\code{NULL} or character, names of data columns defining groups for
+\code{likelihood = "t"}. The points of a group follow a joint multivariate t
+distribution, i.e. they share one scale weight, so a noisy group as a whole
+is down-weighted. \code{NULL} (default) treats each point separately.}
 }
 \value{
 list with

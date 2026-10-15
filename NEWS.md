@@ -1,3 +1,9 @@
+# blotIt 0.4.1
+
+* `alignReplicates()` gains `tGroup` for `likelihood = "t"`: the points of a
+  group (e.g. a gel) follow a joint multivariate t distribution and share one
+  scale weight, so a noisy group is down-weighted as a whole.
+
 # blotIt 0.4.0
 
 * `alignReplicates()` gains `likelihood = c("normal", "t")` and `df`. With

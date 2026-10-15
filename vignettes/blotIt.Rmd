@@ -129,6 +129,8 @@ Here `sigmaA` and `sigmaB` have one value per target and modality. Parameters wi
 
 With `likelihood = "t"`, each data point follows a Student-t distribution with `df` degrees of freedom (default 5) and scale `errorModel`. Single outliers then shift the aligned values much less than with the normal likelihood.
 
+With `tGroup`, e.g. `tGroup = "experiment"`, all points of a group share one scale weight, so a gel that is noisy as a whole is down-weighted.
+
 ```r
 out <- alignReplicates(..., likelihood = "t", df = 5)
 ```

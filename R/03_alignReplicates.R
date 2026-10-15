@@ -59,6 +59,10 @@
 #'   `prediction` and `scaled` is then this scale.
 #' @param df degrees of freedom of the t distribution (fixed), used only for
 #'   `likelihood = "t"`.
+#' @param tGroup `NULL` or character, names of data columns defining groups for
+#'   `likelihood = "t"`. The points of a group follow a joint multivariate t
+#'   distribution, i.e. they share one scale weight, so a noisy group as a whole
+#'   is down-weighted. `NULL` (default) treats each point separately.
 #'
 #' @return list with
 #' \describe{
@@ -111,7 +115,8 @@ alignReplicates <- function(data,
                             multistartSd = 3,
                             cores = 1,
                             likelihood = c("normal", "t"),
-                            df = 5
+                            df = 5,
+                            tGroup = NULL
 ) {
 
   ## BLAS runs single-threaded during the fit, restored on exit
@@ -149,6 +154,13 @@ alignReplicates <- function(data,
     parameterData <- data$parameter
     data <- as.data.frame(data$original)
     data$sigma <- NULL
+  }
+
+  if (!is.null(tGroup)) {
+    if (likelihood != "t") stop("'tGroup' requires likelihood = \"t\".")
+    if (!is.character(tGroup) || !all(tGroup %in% colnames(data))) {
+      stop("'tGroup' must name columns of 'data'.")
+    }
   }
 
   inputCheckReport <- inputCheck(
@@ -398,6 +410,7 @@ alignReplicates <- function(data,
     multistartSd = multistartSd,
     likelihood = likelihood,
     df = df,
+    tGroup = tGroup,
     cores = cores,
     parinit = parinit,
     errorGroups = errorGroups,
@@ -464,7 +477,8 @@ alignReplicates <- function(data,
     error = effectsValues[[3]],
     outputScale = outputScale,
     likelihood = likelihood,
-    likelihoodDf = if (likelihood == "t") df else NULL
+    likelihoodDf = if (likelihood == "t") df else NULL,
+    tGroup = tGroup
   )
 
   if (namesFactored == TRUE) {
