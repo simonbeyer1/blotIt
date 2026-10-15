@@ -1,12 +1,6 @@
-// blotIt trust-region optimizer, C++ kernel. Drop-in replacement for the
-// subset of trust::trust that blotIt uses (rinit/rmax, fterm/mterm, minimize,
-// parscale), with a More-Sorensen subproblem solver (bisection on the
-// Levenberg shift).
-//
-// Unlike trust::trust it never aborts mid-fit: when the Hessian is non-finite
-// or its eigensolve fails it takes a steepest-descent step (Hessian := I)
-// within the current trust region and shrinks on rejected steps. blotIt fits
-// often have near-singular Hessians where trust::trust throws from eigen().
+// Trust-region optimizer with the trust::trust interface used by blotIt and a
+// More-Sorensen subproblem solver. A non-finite Hessian or failed eigensolve
+// gives a steepest-descent step instead of an error.
 
 #define USE_FC_LEN_T
 #include <Rcpp.h>
@@ -27,10 +21,8 @@
 using namespace Rcpp;
 
 
-// Set the OpenMP thread count at runtime, returning the previous value (or
-// NA_INTEGER when built without OpenMP). blotIt pins this to one thread for a
-// fit: some multithreaded MKL builds return wrong eigen/svd results, and MKL
-// reads the OpenMP count. OpenBLAS-pthread ignores OpenMP and is untouched.
+// Sets the OpenMP thread count (read by MKL) and returns the previous value,
+// NA_INTEGER without OpenMP.
 //
 // [[Rcpp::export]]
 int setBlasThreads(int n) {
@@ -47,11 +39,9 @@ namespace {
 
 const double INF = std::numeric_limits<double>::infinity();
 
-// Symmetric K x K eigendecomposition via LAPACK dsyevd (divide & conquer).
-// On success: `vals` holds eigenvalues ascending, `vecs` the eigenvectors
-// column-major; returns true. Returns false (no throw) if the input has any
-// non-finite entry or dsyevd reports info != 0; the caller then falls back to
-// an identity surrogate.
+// Symmetric eigendecomposition via LAPACK dsyevd: `vals` ascending, `vecs`
+// column-major. Returns false instead of throwing on non-finite input or
+// LAPACK failure.
 bool eigen_sym(const std::vector<double>& A, int K,
                std::vector<double>& vals, std::vector<double>& vecs) {
   for (std::size_t i = 0; i < A.size(); ++i)
@@ -82,10 +72,9 @@ bool eigen_sym(const std::vector<double>& A, int K,
   return true;
 }
 
-// More-Sorensen trust-region subproblem: minimise g^T p + 1/2 p^T H p subject
-// to ||p|| <= r, given the eigendecomposition (vals ascending, vecs col-major)
-// of H. Writes the step into `p_out`, the predicted reduction (-model) into
-// `pred_red`, and whether the unconstrained Newton step was taken.
+// Minimises g^T p + 1/2 p^T H p subject to ||p|| <= r from the eigensystem of
+// H. Writes the step to `p_out`, the predicted reduction to `pred_red` and
+// whether the interior Newton step was taken to `is_newton`.
 void trust_sub(int K, const std::vector<double>& g,
                const std::vector<double>& vals, const std::vector<double>& vecs,
                double r, std::vector<double>& p_out,
@@ -232,8 +221,7 @@ List trust_kernel(Function fn,
   for (iter = 1; iter <= iterlim; ++iter) {
     if (!all_finite(g)) break;   // no usable gradient -> stop gracefully
 
-    // Curvature in (optionally) rescaled coordinates: B_s = B / (s s^T),
-    // g_s = g / s. Solve the subproblem in the scaled frame.
+    // Subproblem in parscale coordinates: B_s = B / (s s^T), g_s = g / s.
     std::vector<double> B_s = H;
     if (rescale) {
       for (int j = 0; j < K; ++j)

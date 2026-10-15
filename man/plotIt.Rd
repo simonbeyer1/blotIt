@@ -2,7 +2,7 @@
 % Please edit documentation in R/02_exported_functions.R
 \name{plotIt}
 \alias{plotIt}
-\title{All-in-one plot function for blotIt}
+\title{Plot alignment results}
 \usage{
 plotIt(
   inputList,
@@ -26,79 +26,81 @@ plotIt(
 )
 }
 \arguments{
-\item{inputList}{\code{inputList} file as produced by \link{alignReplicates}, a list
-of data.frames.}
+\item{inputList}{output of \code{\link[=alignReplicates]{alignReplicates()}}.}
 
-\item{...}{Logical expression used for subsetting the data frames, e.g.
+\item{...}{logical expression for subsetting the plotted tables, e.g.
 \code{name == "pERK1" & time < 60}.}
 
-\item{plotPoints}{String to specify which data set should be plotted in form
-of points with corresponding error bars. It must be one of
-\code{c("original", "scaled", "prediction", "aligned")}.}
+\item{plotPoints}{character, the table plotted as points with error bars.
+One of \code{"original"}, \code{"scaled"}, \code{"prediction"}, \code{"aligned"}.}
 
-\item{plotLine}{Same as above but with a line and error band.}
+\item{plotLine}{character, the table plotted as a line with error band.
+Same choices as \code{plotPoints}.}
 
-\item{spline}{Logical, if set to \code{TRUE}, what is specified as
-\code{plotLine} will be plotted as a smooth spline instead of straight lines
-between points.}
+\item{spline}{logical, if \code{TRUE} the line is a cubic polynomial fit instead
+of straight segments between points.}
 
-\item{scales}{String passed as \code{scales} argument to \link[ggplot2]{facet_wrap}.}
+\item{scales}{character, passed as \code{scales} to \code{\link[ggplot2:facet_wrap]{ggplot2::facet_wrap()}}.
+\code{"biological"} is the same as \code{"free_x"}.}
 
-\item{alignZeros}{Logical, if \code{TRUE}, the zero ticks are aligned
-between the facets.}
+\item{alignZeros}{logical, if \code{TRUE} all facets share the lower y limit.}
 
-\item{plotCaption}{Logical, if \code{TRUE}, a caption describing the plotted
-data is added to the plot.}
+\item{plotCaption}{logical, if \code{TRUE} a caption names the plotted tables and
+error sources.}
 
-\item{ncol}{Numerical passed as \code{ncol} argument to
-\link[ggplot2]{facet_wrap}.}
+\item{ncol}{numeric, passed as \code{ncol} to \code{\link[ggplot2:facet_wrap]{ggplot2::facet_wrap()}}.}
 
-\item{useColors}{vector of custom color values as taken by the \code{values}
-argument in the \link[ggplot2]{scale_color_manual} method for \code{ggplot} objects.}
+\item{useColors}{character vector of colors, passed as \code{values} to
+\code{\link[ggplot2:scale_color_manual]{ggplot2::scale_color_manual()}}. \code{NULL} uses the ggplot2 default.}
 
-\item{useOrder}{Optional list of target names in the custom order that will
-be used for faceting.}
+\item{useOrder}{character vector of all target names, the facet order.}
 
-\item{plotScaleY}{character, defining the scale of the y axis}
+\item{plotScaleX, plotScaleY}{character, transformation of the x and y axis:
+\code{"log"}, \code{"log2"}, \code{"log10"}, and for x also \code{"pseudoLog10"}. \code{NULL} uses
+the \code{outputScale} of \code{inputList}.}
 
-\item{plotScaleX}{character, defining the scale of the x axis}
+\item{doseResponse}{logical, if \code{TRUE} the x axis is the dose column
+\code{doseValueName} instead of \code{time}.}
 
-\item{doseResponse}{Logical, indicates if the plot should be dose response}
+\item{doseValueName}{character, the dose column used if \code{doseResponse} is
+\code{TRUE}.}
 
-\item{doseValueName}{name of the column that should be used for the x axis in
-case of a dose response plot. The default is 'dose'}
+\item{labelX, labelY}{character, axis labels. \code{NULL} gives \code{"Time"} or
+\code{"Dose"}, and \code{"Signal"}.}
 
-\item{labelX}{Optional, value passed to \code{xlab} parameter of \link[ggplot2]{ggplot}
-for the x-axis. Default is \code{NULL} leading to 'Time' or 'Dose',
-respectively.}
-
-\item{labelY}{Optional, value passed to \code{ylab} parameter of \link[ggplot2]{ggplot}
-for the y-axis. Default is \code{NULL} leading to 'Signal'.}
-
-\item{FacetLabels}{String, either 'simple' or 'full'. Results in the value of
-the facets being printed either separated by underscores ('simple') or
-with the respective facet names ('full')
-
-\describe{
-To reproduce the known function \code{plot1}, \code{plot2} and \code{plot3},
-use:
-\item{plot1}{
-\code{plotPoints} = 'original', \code{plotLine} = 'prediction'
-}
-\item{plot2}{
-\code{plotPoints} = 'scaled', \code{plotLine} = 'aligned'
-}
-\item{plot3}{
-\code{plotPoints} = 'aligned', \code{plotLine} = 'aligned'
-}
-}}
+\item{FacetLabels}{character, \code{"simple"} joins the facet values with
+underscores, \code{"full"} prints them as \code{column: value} lines.}
 }
 \value{
-ggplot object
+ggplot object.
 }
 \description{
-Takes the output of \link{alignReplicates} and generates graphs. Which data will be
-plotted can then be specified separately.
+Plots one table of an \code{\link[=alignReplicates]{alignReplicates()}} result as points with error bars
+and one as a line with an error band.
+}
+\examples{
+exampleData <- readWide(
+  system.file("extdata", "INFdata_WB_wide.csv", package = "blotIt"),
+  description = seq_len(3)
+)
+
+out <- alignReplicates(
+  data = exampleData,
+  model = "yi / sj",
+  errorModel = "value * sigmaR",
+  biological = yi ~ name + time + condition,
+  scaling = sj ~ name + experiment,
+  error = sigmaR ~ name
+)
+
+## Original data with the model prediction
+plotIt(out, plotPoints = "original", plotLine = "prediction")
+
+## Data scaled to the common scale with the aligned values
+plotIt(out, plotPoints = "scaled", plotLine = "aligned")
+
+## Aligned values only
+plotIt(out, plotPoints = "aligned", plotLine = "aligned")
 }
 \author{
 Severin Bang and Svenja Kemmer

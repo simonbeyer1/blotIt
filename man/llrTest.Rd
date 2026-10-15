@@ -2,76 +2,55 @@
 % Please edit documentation in R/02_exported_functions.R
 \name{llrTest}
 \alias{llrTest}
-\title{Method for hypothesis testing}
+\title{Likelihood ratio test}
 \usage{
 llrTest(H0, H1, check = TRUE)
 }
 \arguments{
-\item{H0}{output of \link{alignReplicates} obeying the null hypothesis. A special
+\item{H0}{output of \code{\link[=alignReplicates]{alignReplicates()}} under the null hypothesis, a special
 case of \code{H1}.}
 
-\item{H1}{output of \link{alignReplicates}, the general case}
+\item{H1}{output of \code{\link[=alignReplicates]{alignReplicates()}} under the alternative.}
 
-\item{check}{logical, if \code{TRUE} verify that \code{H0} is nested in
-\code{H1} before computing the statistic.}
+\item{check}{logical, if \code{TRUE} stop unless the effects of \code{H0} are a subset
+of those of \code{H1}.}
 }
 \value{
-list with the log-likelihood ratio, statistical information and the
-numerical p-value calculated by the evaluating the chi-squared distribution
-at the present log-likelihood ratio with the current degrees of freedom.
+list with \code{llr} (difference of \eqn{-2 \log L}), \code{statistic} (a
+description of the reference distribution) and \code{p.value} from the
+\eqn{\chi^2} distribution with the difference of the degrees of freedom.
 }
 \description{
-Two outputs of \link{alignReplicates} can be tested as nested hypothesis. This can
-be used to test if e.g. buffer material influence can be neglected or a
-specific measurement point is an outlier.
+Tests two nested \code{\link[=alignReplicates]{alignReplicates()}} results against each other, e.g.
+whether a buffer effect is negligible or a measurement is an outlier.
 }
 \examples{
-## load provided example data file
-lrrDataPath <- system.file(
-    "extdata", "exampleLlrTest.csv",
-    package = "blotIt"
-)
-
-## import data
 llrData <- readWide(
-    file = lrrDataPath,
-    description = seq(1, 4),
-    sep = ",",
-    dec = "."
+  system.file("extdata", "exampleLlrTest.csv", package = "blotIt"),
+  description = seq_len(4)
 )
 
-## generate H0: the buffer column is not named as a biological effect e.g.
-## not considered as a biological different condition
+## H0: the buffer column is not a biological effect
 H0 <- alignReplicates(
-    data = llrData,
-    model = "yi / sj",
-    errorModel = "value * sigmaR",
-    biological = yi ~ name + time + stimmulus,
-    scaling = sj ~ name + ID,
-    error = sigmaR ~ name + 1,
-    fitLogscale = FALSE,
-    normalize = TRUE,
-    averageTechRep = FALSE,
-    verbose = FALSE,
-    normalizeInput = TRUE
+  data = llrData,
+  model = "yi / sj",
+  errorModel = "value * sigmaR",
+  biological = yi ~ name + time + stimmulus,
+  scaling = sj ~ name + ID,
+  error = sigmaR ~ name + 1,
+  fitLogscale = FALSE
 )
 
-## generate H1: here the buffer column is named in the biological parameter
-## therefore different entries are considered as biologically different
+## H1: the buffer column is a biological effect
 H1 <- alignReplicates(
-    data = llrData,
-    model = "yi / sj",
-    errorModel = "value * sigmaR",
-    biological = yi ~ name + time + stimmulus + buffer,
-    scaling = sj ~ name + ID,
-    error = sigmaR ~ name + 1,
-    fitLogscale = FALSE,
-    normalize = TRUE,
-    averageTechRep = FALSE,
-    verbose = FALSE,
-    normalizeInput = TRUE
+  data = llrData,
+  model = "yi / sj",
+  errorModel = "value * sigmaR",
+  biological = yi ~ name + time + stimmulus + buffer,
+  scaling = sj ~ name + ID,
+  error = sigmaR ~ name + 1,
+  fitLogscale = FALSE
 )
 
-## perform test
 llrTest(H0, H1)
 }

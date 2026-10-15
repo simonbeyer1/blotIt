@@ -40,10 +40,10 @@ inst/stuff/
 CLAUDE.md
 .claude
 
-# Compiled C/C++ artifacts (the bioconductor block above is malformed and
-# matches only files with a literal leading space, so spell them out here)
+# Build artifacts (the patterns above have a leading space and match nothing)
 *.o
 *.so
 *.dll
 *.dylib
 *.a
+__pycache__/

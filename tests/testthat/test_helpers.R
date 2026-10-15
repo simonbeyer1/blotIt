@@ -182,7 +182,6 @@ test_that("inputCheck()", {
             data = sim_data_long,
             model = "yi / sj",
             errorModel = "value * sigmaR",
-            # biological = "yi ~ name + time + condition",
             scaling = sj ~ name + experiment,
             error = sigmaR ~ name + 1,
             fitLogscale = TRUE
@@ -193,11 +192,8 @@ test_that("inputCheck()", {
     expect_error(
         inputCheck(
             data = sim_data_long,
-            # model = "yi / sj",
             errorModel = "value * sigmaR",
-            # biological = "yi ~ name + time + condition",
             scaling = sj ~ name + experiment,
-            # error = sigmaR ~ name + 1,
             fitLogscale = TRUE
         ),
         "All of model, errorModel, biological, scaling, error must be set."

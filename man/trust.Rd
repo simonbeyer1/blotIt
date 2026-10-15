@@ -2,7 +2,7 @@
 % Please edit documentation in R/trust.R
 \name{trust}
 \alias{trust}
-\title{Robust trust-region optimizer}
+\title{Trust-region optimizer}
 \usage{
 trust(
   objfun,
@@ -20,13 +20,11 @@ trust(
 )
 }
 \arguments{
-\item{objfun}{objective function returning a list with components
-\code{value}, \code{gradient} and \code{hessian} (as required by
-\code{trust::trust}). It may return additional components (e.g.
-\code{prediction}, \code{sigma}); these are preserved in the result, taken
-from a final evaluation at the solution.}
+\item{objfun}{objective function returning a list with \code{value}, \code{gradient}
+and \code{hessian}. Further components (e.g. \code{prediction}, \code{sigma}) are
+returned from a final evaluation at the solution.}
 
-\item{parinit}{numeric vector of starting parameters (names are kept).}
+\item{parinit}{numeric vector of starting parameters; names are kept.}
 
 \item{rinit, rmax}{initial and maximum trust-region radius.}
 
@@ -40,32 +38,30 @@ and on the predicted reduction.}
 
 \item{minimize}{logical; minimize (default) or maximize \code{objfun$value}.}
 
-\item{blather}{accepted for compatibility with \code{trust::trust}; the
+\item{blather}{accepted for compatibility with \code{\link[trust:trust]{trust::trust()}}; the
 iteration path is not recorded.}
 
-\item{structured}{logical; when \code{TRUE} the optimization is run by the
-sparse, structure-exploiting kernel \code{trustStructured()} instead of the
-dense C++ kernel. This is required when the number of parameters is large
-enough that a dense \eqn{K \times K} Hessian / eigensolve would not fit in
-memory. The objective must then return a sparse \code{hessian} plus the
-rank-1 \code{constrVec} (see \code{objFunction(..., sparseHessian = TRUE)}).}
+\item{structured}{logical; if \code{TRUE}, use the sparse optimizer for large
+problems. \code{objfun} must then return a sparse \code{hessian} (a \code{Matrix} object)
+and the rank-1 term \code{constrVec}, the full Hessian being
+\eqn{H + 2vv^\top}. \code{rinit}, \code{rmax} and \code{parscale} are ignored.}
 
-\item{...}{further arguments passed on to \code{objfun} at every evaluation.}
+\item{...}{further arguments passed on to \code{objfun}.}
 }
 \value{
-A list with \code{argument} (the solution), \code{value},
-  \code{converged}, \code{iterations}, plus all components returned by a final
-  call to \code{objfun} at the solution (\code{gradient}, \code{hessian},
-  and any extras such as \code{prediction}/\code{sigma}).
+list with \code{argument} (the solution), \code{value}, \code{converged},
+\code{iterations} and all components of \code{objfun} at the solution.
 }
 \description{
-A drop-in replacement for \code{trust::trust} backed by a compiled C++
-kernel (see \code{src/trust_kernel.cpp}). It implements the same trust-region
-method but does not abort when the Hessian at the current point is
-ill-conditioned or non-finite: on any failure of the symbolic eigen-solve it
-falls back to a steepest-descent step within the current trust region and
-shrinks the region on rejected steps. This avoids the
-\code{"error code 1 from Lapack routine 'dsyevr'"} crashes that
-\code{trust::trust} throws for the near-singular fits blotIt produces when a
-target has many scaling parameters.
+Replacement for \code{\link[trust:trust]{trust::trust()}} that does not abort on ill-conditioned or
+non-finite Hessians. See \code{vignette("blotIt")} for the method.
+}
+\examples{
+## Minimize a quadratic with minimum at (1, -2)
+objfun <- function(x) {
+  d <- x - c(1, -2)
+  list(value = sum(d^2), gradient = 2 * d, hessian = diag(2, 2))
+}
+fit <- trust(objfun, parinit = c(a = 0, b = 0), rinit = 1, rmax = 10)
+fit$argument
 }

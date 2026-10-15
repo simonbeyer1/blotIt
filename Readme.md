@@ -1,16 +1,11 @@
 
 # BlotIt - Optimal alignment of western blot and qPCR experiments
 
-The present package bases on [blotIt2](https://github.com/dkaschek/blotIt2) by Daniel Kaschek. The aim of this toolbox is to align biological replicate data to a common scale, making the quantitative data of different experiments comparable.
+This package is based on [blotIt2](https://github.com/dkaschek/blotIt2) by Daniel Kaschek. The aim of this toolbox is to align biological replicate data to a common scale, making the quantitative data of different experiments comparable.
 
-## System preperation
+## Installation
 
-blotIt requires the `R` packages `utils, MASS, data.table, ggplot2, rootSolve, data.table` and `trust`. Additionally, the package `devtools` is needed to install blotIt from github. If not already done, the required packages can be installed by executing
-
-```r
-install.packages(c("utils", "MASS", "data.table", "ggplot2", "rootSolve", "trust", "devtools", "data.table"))
-```
-blotIt is then installed via `devtools`:
+blotIt compiles C++ code (Rcpp), so a compiler toolchain is required. The analytic model inversion uses the Python package SymPy via `reticulate`; without it blotIt falls back to a numeric inversion. Install from GitHub with `devtools`:
 ```r
 devtools::install_github("JetiLab/blotIt")
 ```
@@ -84,7 +79,9 @@ out <- alignReplicates(
 )
 ```
 
-The resulting `out` file consists of a list containing the aligned and scaled data as well as some additional datasets.
+The result `out` is a list with the aligned and scaled data, the parameter table and further tables, see `?alignReplicates`.
+
+Start values can be set per parameter or level with `parinit`. `multistart` runs additional fits from perturbed start values, in parallel with `cores > 1` (not on Windows); `plotWaterfall(out)` shows the objective values of all starts. `error` also accepts a list of formulas, one per error parameter group.
 
 ### Plotting
 The data can be plotted via

@@ -2,7 +2,7 @@
 % Please edit documentation in R/03_alignReplicates.R
 \name{alignReplicates}
 \alias{alignReplicates}
-\title{Align time-course data based on an Mixed-Effects alignment model}
+\title{Align replicate data on a common scale}
 \usage{
 alignReplicates(
   data,
@@ -22,177 +22,121 @@ alignReplicates(
   iterlim = 100,
   optControls = list(),
   multistart = 1,
-  rootControls = list()
+  rootControls = list(),
+  parinit = NULL,
+  multistartSd = 3,
+  cores = 1,
+  likelihood = c("normal", "t"),
+  df = 5
 )
 }
 \arguments{
-\item{data}{data.frame containing the the data to be scaled. Usualy the
-output of \link{readWide} is used. Obligatory are the columns \code{name},
-and \code{value}. In the case of time dependet data, a \code{time} column is
-also necessary. Additionally, \code{data} should have further columns,
-e.g. characterizing experimental conditions (the fixed effects) and
-sources of variance between data of the same experimental condition
-(the scaled variables).}
+\item{data}{data frame in long format, usually the output of \code{\link[=readWide]{readWide()}}.
+Required columns are \code{name} and \code{value}, plus the columns named in
+\code{biological}, \code{scaling} and \code{error}.}
 
-\item{model}{character defining the model by which the values in
-\code{data} can be described, e.g. "yi/sj"}
+\item{model}{character, the alignment model, e.g. \code{"yi / sj"}.}
 
-\item{errorModel}{character defining a model for the standard
-deviation of a value, e.g. "sigma0 + value * sigmaR". This model
-can contain parameters, e.g. "sigma0" and "sigmaR", or numeric
-variables from \code{data}, e.g. "value" or "time".}
+\item{errorModel}{character, model of the standard deviation, e.g.
+\code{"sigma0 + value * sigmaR"}. It may use parameters, data columns and
+\code{value}, which stands for the model prediction.}
 
-\item{biological}{two-sided formula of the form
-\code{par1+par2+... ~ name1+name2+...} where "par1, par2, ..." are
-parameters contained in \code{model}, e.g. "yi", and "name1, ..."
-refers to variables in \code{data}, e.g. "condition".
-The parameters "par1, ..." are determined specific to the levels of
-"name1, ...".}
+\item{biological}{two-sided formula \code{par1 + par2 ~ col1 + col2} assigning
+the biological parameters of \code{model} one value per level of the data
+columns on the right-hand side.}
 
-\item{scaling}{two-sided formula of the form
-\code{par1+par2+... ~ name1+name2+...} where "par1, par2, ..." are
-parameters contained in \code{model}, e.g. "sj", and "name1, ..."
-refers to variables in \code{data}, e.g. "Experiment".}
+\item{scaling}{two-sided formula as \code{biological} for the scaling parameters.}
 
-\item{error}{two-sided formula of the form
-\code{par1+par2+... ~ name1+name2+...} where "par1, par2, ..." are
-parameter contained in \code{error}, e.g. "sigma0" and "sigmaR", and
-"name1, ..." refers to variables in \code{data}. If the same values
-of "par1, ..." should be assumed for all data, the right hand side of ~ has
-to reffer to the "name" column of \code{data}.}
+\item{error}{two-sided formula as \code{biological} for the error parameters, or
+a list of such formulas to give each error parameter its own levels, e.g.
+\code{list(sigmaA ~ name + modality, sigmaB ~ name)}. Use \code{~ name} for one value
+per target.}
 
-\item{fitLogscale}{logical, defining if the parameters are
-fitted on a log scale. Computational reasons.}
+\item{fitLogscale}{logical, fit the logarithm of the parameters.}
 
-\item{normalize}{logical indicating whether the biological effect
-parameter should be normalized to unit mean.}
+\item{normalize}{logical, constrain the mean of the first biological
+parameter to 1.}
 
-\item{averageTechRep}{logical, indicates if the technical replicates
-should be averaged}
+\item{averageTechRep}{logical, average data points that share all
+biological and scaling levels.}
 
-\item{verbose}{logical, print out information about each fit}
+\item{verbose}{logical, print information about each fit.}
 
-\item{namesFactored}{logical, indicates if the \code{name} columns of the
-output should be parsed as factors instead of characters.}
+\item{namesFactored}{logical, return \code{name} columns as factors.}
 
-\item{normalizeInput}{logical, if TRUE the input will be normalized before
-scaling, helpful if convergence fails because the data varies for to many
-orders of magnitude.}
+\item{normalizeInput}{logical, normalize the data of each target before the
+fit: positive data are divided by their mean, other data are centered.}
 
-\item{keepOriginalScale}{character, if "none" the output will have another mean as the input, use "log" to keep same offset of log-data and "lin" to keep same mean for linear data}
+\item{keepOriginalScale}{character, \code{"none"} (default), \code{"lin"} to rescale
+outputs to the mean of the input, or \code{"log"} to shift them to it.}
 
-\item{outputScale}{character, scale on which the aligned values are returned
-and plotted. "linear" (default) leaves them unchanged; other values name a
-transformation (e.g. "log") understood by \code{\link{plotIt}}.}
+\item{outputScale}{character, scale of the returned aligned values:
+\code{"linear"} (default) or a transformation understood by \code{\link[=plotIt]{plotIt()}}.}
 
-\item{iterlim}{numerical, shorthand for
-\code{optControls = list(iterlim = ...)}.  Kept for backward
-compatibility; if \code{optControls$iterlim} is also set it takes
+\item{iterlim}{integer, iteration limit. \code{optControls$iterlim} takes
 precedence.}
 
-\item{optControls}{named list of control parameters passed to
-  \code{\link[trust]{trust}}.  Supported entries (with defaults):
-\describe{
-  \item{\code{rinit}}{Initial trust region radius (default \code{0.1}).}
-  \item{\code{rmax}}{Maximum trust region radius (default \code{10}).}
-  \item{\code{parscale}}{Logical or numeric vector for parameter
-    rescaling.  \code{FALSE} (default) disables rescaling; a numeric
-    vector is passed directly to \code{trust}.}
-  \item{\code{iterlim}}{Iteration limit (default \code{100}).}
-  \item{\code{fterm}}{Convergence tolerance for objective value change
-    (default \code{sqrt(.Machine$double.eps)}).}
-  \item{\code{mterm}}{Convergence tolerance for step size
-    (default \code{sqrt(.Machine$double.eps)}).}
-  \item{\code{structuredThreshold}}{Parameter count above which a target is
-    fit with the sparse, structure-exploiting optimizer instead of the dense
-    kernel (default \code{5000}). The sparse path avoids the dense
-    \eqn{nPars \times nPars} Hessian and makes fits with up to
-    \eqn{\sim 10^6} parameters (dense time-course alignment) feasible.}
-}
-Any entries not supplied use the defaults above.}
+\item{optControls}{named list of optimizer settings: \code{rinit} (default 0.1),
+\code{rmax} (10), \code{parscale} (\code{FALSE}), \code{iterlim} (100), \code{fterm} and \code{mterm}
+(both \code{sqrt(.Machine$double.eps)}), see \code{\link[=trust]{trust()}}, and
+\code{structuredThreshold} (5000), the parameter count above which the sparse
+optimizer is used.}
 
-\item{multistart}{integer, number of optimization starts.
-\code{multistart = 1} (the default) runs a single fit from the
-default initial values.  Values \eqn{> 1} run additional fits
-from randomly perturbed starting points; the result with the
-lowest objective value is kept.}
+\item{multistart}{integer, number of fits per target. Start 1 is the initial
+point, the others perturb it randomly. A converged start replaces start 1
+if its objective value is lower.}
 
-\item{rootControls}{list of control parameters for the model inversion
-step (scaling to common scale). The inversion is primarily solved
-elementwise per data point using \code{\link[stats]{uniroot}} (Brent's
-method). If any points fail, \code{\link[nleqslv]{nleqslv}} is used as
-fallback. Supported entries:
-\code{searchInterval} (numeric vector of length 2, default
-\code{c(-100, 100)}) defining the initial bracket for each 1D problem.
-For the \code{nleqslv} fallback: \code{method} (\code{"Newton"} or
-\code{"Broyden"}), \code{global} (globalization strategy), and
-\code{control} (a list with e.g. \code{allowSingular}, \code{xtol},
-\code{ftol}, \code{maxit}).}
+\item{rootControls}{list of arguments passed to \code{\link[nleqslv:nleqslv]{nleqslv::nleqslv()}} when
+the model has no analytic inverse, e.g. \code{method}, \code{global}, \code{control}.}
+
+\item{parinit}{\code{NULL} (all parameters start at 1) or a named list of start
+values on the scale of the parameter table. Each entry is a number for all
+levels or a vector named by level (as in the \code{level} column of the
+parameter table). Parameters and levels not given start at 1.}
+
+\item{multistartSd}{standard deviation of the normal perturbations of the
+start values (on the fit scale) for starts 2 to \code{multistart}.}
+
+\item{cores}{integer, number of processes for the multistart fits. Values
+\eqn{> 1} fork processes and are not available on Windows. Results do not
+depend on \code{cores}.}
+
+\item{likelihood}{\code{"normal"} (default) or \code{"t"}. With \code{"t"}, each data point
+follows a Student-t distribution with location \code{model} and scale
+\code{errorModel}, which reduces the influence of outliers. The \code{sigma} of
+\code{prediction} and \code{scaled} is then this scale.}
+
+\item{df}{degrees of freedom of the t distribution (fixed), used only for
+\code{likelihood = "t"}.}
 }
 \value{
-Object of class \code{aligned}, i.e. a data frame of the
-alignment result containing an attribute "outputs":
- a list of data frames
+list with
 \describe{
-\item{aligned}{data.frame with the original column names plus the column
-    \code{sigma}. Each set of unique biological effects i.e. biological
-    different condition (e.g. time point, target and treatment) has one set
-    of \code{value} and \code{sigma}. The values are the estimated true
-    values i.e. the determined biological parameters. The errors in the
-    \code{sigma} column are estimated by employing the fisher information
-    to quantify the uncertainty of the respective fit. Both, the value and
-    its error are on the common scale.}
-\item{scaled}{The original measurements scaled to common scale by applying
-    inverse model. The errors are the result of the evaluation of the error
-    model and then also scaled to common scale by use of Gaussian error
-    propagation.}
-\item{prediction}{Original data with \code{value} replaced by the prediction
-    (evaluation of the model with the fitted parameters), and \code{sigma}
-    from the evaluation of the error model. Both are on the original scale.
-    }
-
-\item{original}{The original data as passed as  \code{data}.}
-\item{originalWithParameters}{The original data but with added columns
-    containing the estimated parameters}
-
-\item{parameter}{Parameter table with the columns: \code{name}: the name of
-    the current target, \code{level}: the pasted unique set of effects
-    (biological, scaling or error), \code{parameter}: the parameter
-    identifier as defined in the (error) model, \code{value} and \code{sigma}
-    containing the determined values and corresponding errors, \code{nll}:
-    twice the negative log-likelihood of the fit, \code{noPars} and
-    \code{noData} containing the number of parameters and data points for
-    the respected fit. This list entry also has two attributes: \code{value}
-    containing the final value (residual sum of squares) passed to
-    \code{\link{trust}} by the objective function and \code{df} the degrees
-    of freedom of the fitting process.}
-
-\item{biological}{Names of the columns containing the biological effects}
-\item{scaling}{Names of the columns containing the scaling effects}
-\item{error}{Names of the columns containing the error effects}
+\item{aligned}{one row per biological level with the estimated \code{value},
+its \code{sigma} from the Fisher information, \code{lower} and \code{upper}, on the
+common scale.}
+\item{scaled}{the measurements mapped to the common scale by the inverse
+model, with propagated errors.}
+\item{prediction}{the data with \code{value} replaced by the model prediction
+and \code{sigma} by the error model, on the original scale.}
+\item{original}{the data that were fitted.}
+\item{originalWithParameters}{the data with one column per fitted
+parameter.}
+\item{parameter}{parameter table with columns \code{name}, \code{level},
+\code{parameter}, \code{value}, \code{sigma}, \code{nll} (\eqn{-2 \log L}), \code{noPars},
+\code{noData}, \code{lower}, \code{upper}, and attributes \code{value} (total
+\eqn{-2 \log L}) and \code{df} (degrees of freedom). Parameters without
+influence on the likelihood are not fitted and reported as \code{NA}.}
+\item{multistart}{final objective value, convergence and iterations of each
+start per target, see \code{\link[=plotWaterfall]{plotWaterfall()}}.}
+\item{biological, scaling, error}{names of the data columns of each effect.}
+\item{outputScale}{the \code{outputScale} argument.}
 }
-
-The estimated parameters are returned by the attribute "parameters".
 }
 \description{
-The function deals primarily with time-course data of different
-targets which have been measured under different experimental
-conditions and whose measured values might be on a different
-scale, e.g. because of different amplification. The algorithm
-determines the different scaling and estimates the time-course on
-a common scale.
-}
-\details{
-Alignment of time-course data is achieved by an alignment
-model which explains the observed data by a function mixing
-fixed effects, usually parameters reflecting the "underlying"
-time-course, and latent variables, e.g. scaling parameters taking
-account for effects like different amplification or loading, etc.
-Depending on the measurement technique, the data has constant
-relative error, or constant absolute error or even a combination
-of those. This error is described by an error function. The error
-parameters are usually global, i.e. the same parameter values are
-assumed for all data points.
+Fits an alignment model with biological, scaling and error parameters per
+target by maximum likelihood and returns the aligned values with their
+uncertainties. See \code{vignette("blotIt")} for the method.
 }
 \examples{
 ## Get example dataset
@@ -219,6 +163,5 @@ out <- alignReplicates(
 )
 }
 \seealso{
-\link{readWide} to read data in a wide column format and
-get it in the right format for \code{alignReplicates}.
+\code{\link[=readWide]{readWide()}}, \code{\link[=plotIt]{plotIt()}}, \code{\link[=llrTest]{llrTest()}}
 }

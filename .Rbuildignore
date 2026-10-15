@@ -8,3 +8,4 @@
 ^Readme\.md$
 ^blotIt\.Rcheck$
 ^blotIt_.*\.tar\.gz$
+__pycache__

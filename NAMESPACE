@@ -3,18 +3,25 @@
 export(alignReplicates)
 export(llrTest)
 export(plotIt)
+export(plotWaterfall)
 export(readWide)
 export(trust)
 import(data.table)
 import(ggplot2)
 importFrom(Rcpp,sourceCpp)
 importFrom(nleqslv,nleqslv)
-importFrom(reticulate,import_from_path)
-importFrom(reticulate,py_require)
-importFrom(stats,D)
-importFrom(stats,pchisq)
-importFrom(stats,rnorm)
-importFrom(utils,getParseData)
-importFrom(utils,modifyList)
-importFrom(utils,read.csv)
+importFrom(reticulate,
+  import_from_path,
+  py_require
+)
+importFrom(stats,
+  D,
+  pchisq,
+  rnorm
+)
+importFrom(utils,
+  getParseData,
+  modifyList,
+  read.csv
+)
 useDynLib(blotIt, .registration = TRUE)

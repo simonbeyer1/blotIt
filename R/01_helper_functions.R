@@ -1,28 +1,20 @@
 # getSymbols() -----------------------------------------------------------
 
-#' Function to retrieve symbols from formula-formatted input
+#' Symbols in expression strings
 #'
-#' Formula like strings are parsed, and returned in form of a list
+#' @param char character vector of expressions; entries `"0"` are ignored.
+#' @param exclude character vector of symbols to drop.
 #'
-#' @param char input
-#' @param exclude parts of the formula which will be excluded from output
-#'
-#' @return data frame with columns "name", "time", "value" and other
-#' columns describing the measurements.
+#' @return character vector of unique symbol names.
 #'
 #' @importFrom utils getParseData
 #'
 #' @noRd
 getSymbols <- function(char, exclude = NULL) {
-  ## Parse input data
   char <- char[char != "0"]
   out <- parse(text = char, keep.source = TRUE)
   out <- utils::getParseData(out)
-
-  ## Split the input string at non-caracter symbols
   names <- unique(out$text[out$token == "SYMBOL"])
-
-  ## Remove strings passed as "exclude"
   if (!is.null(exclude)) {
     names <- names[!names %in% exclude]
   }
@@ -30,36 +22,39 @@ getSymbols <- function(char, exclude = NULL) {
 }
 
 
-
-
 # identifyEffects() ------------------------------------------------------
 
-#' Method to identify the names and values of passed to biological, scaling and
-#' error parameters
+#' Parameter and column names of the effect formulas
 #'
-#' The formula-formatted input will be parsed by \link{getSymbols} and the
-#' respective output then passed back
+#' @param biological,scaling two-sided formulas.
+#' @param error a two-sided formula or a list of them.
 #'
-#' @param biological input for biological parameters
-#' @param scaling input for scaling parameters
-#' @param error input for error parameters
-#'
-#' @return two lists: values and parameter names
+#' @return list with `effectsValues`, `effectsPars` and `errorGroups` (named
+#'   list error parameter -> data columns, `NULL` for a single error formula)
 #'
 #' @noRd
-
 identifyEffects <- function(biological = NULL, scaling = NULL, error = NULL) {
 
-  ## Get biological scale and error parameters
   biologicaValues <- getSymbols(as.character(biological)[3])
   scalingValues <- getSymbols(as.character(scaling)[3])
-  errorValues <- getSymbols(as.character(error)[3])
-
-
-  # Determine to which class parameters belong
   biologicalPars <- getSymbols(as.character(biological)[2])
   scalingPars <- getSymbols(as.character(scaling)[2])
-  errorPars <- getSymbols(as.character(error)[2])
+
+  errorGroups <- NULL
+  if (is.list(error)) {
+    errorGroups <- do.call(c, lapply(error, function(f) {
+      lhs <- getSymbols(as.character(f)[2])
+      stats::setNames(rep(list(getSymbols(as.character(f)[3])), length(lhs)), lhs)
+    }))
+    if (anyDuplicated(names(errorGroups))) {
+      stop("Each error parameter may appear in only one 'error' formula.")
+    }
+    errorValues <- unique(unlist(errorGroups, use.names = FALSE))
+    errorPars <- names(errorGroups)
+  } else {
+    errorValues <- getSymbols(as.character(error)[3])
+    errorPars <- getSymbols(as.character(error)[2])
+  }
 
   effectsValues <- list(
     biologicaValues = biologicaValues,
@@ -72,29 +67,27 @@ identifyEffects <- function(biological = NULL, scaling = NULL, error = NULL) {
     errorPars = errorPars
   )
 
-  return(list(effectsValues = effectsValues, effectsPars = effectsPars))
+  return(list(
+    effectsValues = effectsValues,
+    effectsPars = effectsPars,
+    errorGroups = errorGroups
+  ))
 }
-
 
 
 # replaceSymbols ----------------------------------------------------------
 
-#' Method for replacing parts of a string. Used to paste expresisons for the
-#' (error-) model.
+#' Replace symbols in expression strings
 #'
-#' The formula-formatted input will be parsed by \link{getSymbols} and the
-#' respective output then passed back
+#' @param what character vector of symbols to replace.
+#' @param by replacement strings, recycled to the length of `what`.
+#' @param x character vector of expressions; entries `"0"` stay unchanged.
 #'
-#' @param what string or vector of strings to be replaced
-#' @param by string or vector of strings that will take the replaced place
-#' @param x string in which \code{what} will be replaced by \code{by}
-#'
-#' @return string, \code{x} with the replaced object.
+#' @return `x` with every symbol in `what` replaced.
 #'
 #' @importFrom utils getParseData
 #'
 #' @noRd
-#'
 replaceSymbols <- function(what, by, x) {
   xOrig <- x
   notZero <- which(x != "0")
@@ -123,43 +116,25 @@ replaceSymbols <- function(what, by, x) {
 }
 
 
-
 # paste_() ----------------------------------------------------------------
 
-#' Just a shorthand
-#' @param ... the thing that should be pasted.
+#' `paste()` with separator `"_"`
 #'
 #' @noRd
 paste_ <- function(...) paste(..., sep = "_")
 
 
-
-
 # analyzeBlocks() --------------------------------------------------------
 
-#' Method to analyze which elements of the given matrix with <number of unique
-#' set of scaling parameters> columns, and <unique set of biological
-#' parameters> rows, are on the same scale (same block) and pass a list of lists
-#' of the respective indices.
-#' Each row describes a unique set of biological conditions, e.g. a
-#' specific target measured under a specific condition at one time point.
-#' The columns describe the sets of scaling parameters as target name and
-#' gel (in case of western blot).
+#' Groups of biological levels linked by shared scaling levels
 #'
+#' @param blockMatrix 0/1 matrix, rows are biological levels, columns are
+#'   scaling levels, 1 where a level combination was measured.
 #'
-#' @param blockMatrix Input matrix, with entries equal to 1 wherever the set of
-#' biological effects (row) is measured und the respective set of scaling
-#' effects (column), i.e. each row has a one for each scaling under which it was
-#' measured and each column has a one indicating which biological effects
-#' where measured at the respective scaling.
-#' All entries are either one or zero.
-#'
-#' @return List with one entry per scale. Each entry contains a list of row
-#' indices of the sets of biological effects measured under the respective
-#' scale.
+#' @return list with one integer vector of row indices per connected block,
+#'   rows ascending, blocks ordered by their smallest row.
 #'
 #' @noRd
-
 analyzeBlocks <- function(blockMatrix) {
   out <- which(rowSums(blockMatrix) == 0)
   if (length(out) > 0) {
@@ -170,16 +145,14 @@ analyzeBlocks <- function(blockMatrix) {
   nR <- nrow(blockMatrix)
   nC <- ncol(blockMatrix)
 
-  ## Connected components of the bipartite (row <-> column) graph via union-find:
-  ## nodes 1..nR are rows, nR+1..nR+nC are columns, each non-zero entry an edge.
-  ## Runs in O(nnz * alpha(n)).
+  ## Union-find over the bipartite graph: nodes 1..nR are rows, nR + 1..nR + nC
+  ## are columns, each non-zero entry is an edge.
   edges <- which(blockMatrix == 1, arr.ind = TRUE)
   parent <- seq_len(nR + nC)
 
   findRoot <- function(x) {
     root <- x
     while (parent[root] != root) root <- parent[root]
-    ## path halving
     while (parent[x] != root) {
       nxt <- parent[x]
       parent[x] <<- root
@@ -194,11 +167,7 @@ analyzeBlocks <- function(blockMatrix) {
     if (ra != rb) parent[ra] <- rb
   }
 
-  ## Group the row nodes by component root.
   rowRoots <- vapply(seq_len(nR), findRoot, integer(1))
-
-  ## Preserve the original output convention: one entry per component, rows
-  ## sorted ascending, components ordered by their smallest row index.
   rowOrder <- order(rowRoots, seq_len(nR))
   splitRoots <- rowRoots[rowOrder]
   rComponents <- split(rowOrder, splitRoots)
@@ -209,23 +178,16 @@ analyzeBlocks <- function(blockMatrix) {
 }
 
 
-
 # splitForScaling()  ----------------------------------------------------
 
-
-#' split_data
+#' Split data into independently fitted blocks
 #'
-#' Split data in independent blocks according to biological and scaling
-#' variables as being defined for \link{alignReplicates}. Each block will be given an
-#' individual scaling factor.
+#' @param data long-format data frame.
+#' @param effectsValues list of the biological, scaling and error column names.
+#' @param normalizeInput logical; if `TRUE`, each block is divided by its mean
+#'   (positive data) or centered by its mean (otherwise).
 #'
-#' @param data data frame with columns "name", "time", "value" and others
-#' @param effectsValues two-sided formula, see \link{alignReplicates}
-#' @param normalizeInput logical, if set to TRUE, the input data will be
-#' normalized by dividing all entries belonging to one scaling factor by their
-#' respective mean. This prevents convergence failure on some hardware when the
-#' data for different scaling effects differ by to many orders of magnitude.
-#' @return list of data frames
+#' @return list of data frames, one per block.
 #'
 #' @noRd
 splitForScaling <- function(data,
@@ -238,35 +200,27 @@ splitForScaling <- function(data,
     intercept <- TRUE
   }
 
-  # Construnct strings containing the values of the respective effects
   scalingStrings <- Reduce(paste_, data[effectsValues[[2]]])
   biologicalStrings <- Reduce(paste_, data[effectsValues[[1]]])
 
   scalingStringsUnique <- unique(scalingStrings)
   biologicalStringsUnique <- unique(biologicalStrings)
 
-  # Initialize matrix
   blockMatrix <- matrix(
     0,
     ncol = length(scalingStringsUnique),
     nrow = length(biologicalStringsUnique)
   )
-
-  ## Mark blockMatrix[bio, scaling] = 1 for every datapoint, mapping each row to
-  ## its unique biological (row) and scaling (column) index via match(). O(noData).
   rowIdx <- match(biologicalStrings, biologicalStringsUnique)
   colIdx <- match(scalingStrings, scalingStringsUnique)
   blockMatrix[cbind(rowIdx, colIdx)] <- 1
 
-  ## compile list of scalings
   scalingsList <- analyzeBlocks(blockMatrix)
 
-  ## Remove the "1"-column added above
   if (!intercept) {
     data <- data[, -which(colnames(data) == "1")]
   }
 
-  ## Compile the list
   outList <- lapply(
     scalingsList,
     function(l) {
@@ -274,23 +228,16 @@ splitForScaling <- function(data,
     }
   )
 
-  ## normalize the data
-  if (normalizeInput) {
-    for (i in seq_len(length(outList))) {
-      v <- outList[[i]]$value
-      if (all(v > 0)) {
-        ## Strictly positive (linear-scale) data: centre the block
-        ## multiplicatively around 1 by dividing by its mean.
-        outList[[i]]$value <- v / mean(v)
-      } else {
-        ## Data containing zero/negative values - e.g. log-transformed
-        ## input or a log model such as "log(yi) - log(sj)". A
-        ## multiplicative normalization would divide by a mean that can be
-        ## ~0 (log values straddle zero), producing Inf/NaN and breaking the
-        ## optimizer. Centre additively instead, which is the log-space
-        ## equivalent of dividing by the (geometric) mean on linear scale.
-        outList[[i]]$value <- v - mean(v)
-      }
+  if (!normalizeInput) {
+    return(outList)
+  }
+  for (i in seq_len(length(outList))) {
+    v <- outList[[i]]$value
+    ## Blocks with non-positive values are centered, since their mean can be ~0
+    if (all(v > 0)) {
+      outList[[i]]$value <- v / mean(v)
+    } else {
+      outList[[i]]$value <- v - mean(v)
     }
   }
 
@@ -298,23 +245,16 @@ splitForScaling <- function(data,
 }
 
 
-
 # inputCheck() -----------------------------------------------------------
 
-#' Check input parameters for structural errors
+#' Check the arguments of `alignReplicates()` for structural errors
 #'
-#' the input of \link{alignReplicates} is checked for user mistakes.
+#' @param data,model,errorModel,biological,scaling,error,fitLogscale,outputScale
+#'   as in `alignReplicates()`.
 #'
-#' @param data Input data, usually output of \link{readWide}
-#' @param model Model definition as a string
-#' @param errorModel Error model definition as a string
-#' @param biological Definition of the biological effects
-#' @param scaling Definition of the scaling effects
-#' @param error Definition of the error effects
-#' @param fitLogscale logical, defines the parameter fit scale
+#' @return `"All input checks passed."`, or an error.
 #'
 #' @noRd
-
 inputCheck <- function(data = NULL,
                        model = NULL,
                        errorModel = NULL,
@@ -323,8 +263,6 @@ inputCheck <- function(data = NULL,
                        error = NULL,
                        fitLogscale = NULL,
                        outputScale = NULL) {
-
-  ## Check if parameters are present
   if (is.null(model) | is.null(errorModel) | is.null(biological) |
       is.null(scaling) | is.null(error)) {
     stop(
@@ -333,15 +271,17 @@ inputCheck <- function(data = NULL,
     )
   }
 
-  ## check data
+  errorList <- if (is.list(error)) error else list(error)
+  if (length(errorList) == 0) {
+    stop("'error' must be a formula or a non-empty list of formulas.")
+  }
+
   columnNames <- names(data)
-  expectedNames <- union(
+  expectedNames <- unique(c(
     getSymbols(as.character(biological)[3]),
-    union(
-      getSymbols(as.character(scaling)[3]),
-      getSymbols(as.character(error)[3])
-    )
-  )
+    getSymbols(as.character(scaling)[3]),
+    unlist(lapply(errorList, function(f) getSymbols(as.character(f)[3])))
+  ))
 
   if (!all(expectedNames %in% columnNames)) {
     stop(
@@ -350,18 +290,15 @@ inputCheck <- function(data = NULL,
     )
   }
 
-  ## Check scaling
   if (!is.logical(fitLogscale)) {
     stop(
       "'fitLogscale' must be logical"
     )
   }
 
-
-
-  ## Stop if formulas have the wrong specification
   if (length(as.character(biological)) == 1 |
-      length(as.character(scaling)) == 1 | length(as.character(error)) == 1) {
+      length(as.character(scaling)) == 1 |
+      any(vapply(errorList, function(f) length(as.character(f)) == 1, TRUE))) {
     stop("Do not pass biological, scaling or error as string.")
   }
   if (length(as.character(biological)) < 3) {
@@ -370,7 +307,7 @@ inputCheck <- function(data = NULL,
   if (length(as.character(scaling)) < 3) {
     stop("Left and right-hand side of formula 'scaling' is needed")
   }
-  if (length(as.character(error)) < 3) {
+  if (any(vapply(errorList, function(f) length(as.character(f)) < 3, TRUE))) {
     stop("Left and right-hand side of formula 'error' is needed")
   }
 
@@ -379,37 +316,19 @@ inputCheck <- function(data = NULL,
 }
 
 
-
 # structuredDiagInverse() ------------------------------------------------
 
-#' Diagonal of the inverse of an arrow + rank-1 Hessian
+#' Diagonal of the inverse of an arrow plus rank-1 Hessian
 #'
-#' For the large-parameter path the full Hessian is
-#' \eqn{H = H_{\mathrm{GN}} + 2\,vv^{\top}} with \eqn{v = }\code{constrVec}.
-#' \code{scaleTarget} needs \eqn{\mathrm{diag}(H^{-1})} for the parameter
-#' uncertainties, but \eqn{H} is far too large to invert densely
-#' (\code{MASS::ginv}, as used in the small path). It is, however, an arrow
-#' matrix: the biological block of \eqn{H_{\mathrm{GN}}} is diagonal (no two
-#' biological levels share a data point) and is bordered by only a handful of
-#' scaling/error parameters, with the constraint a rank-1 update on the
-#' biological block. This routine exploits that structure to return the exact
-#' diagonal of \eqn{H^{-1}} in \eqn{O(nPars \cdot m^2)} time and
-#' \eqn{O(nPars \cdot m)} memory (\eqn{m} = number of border parameters).
+#' Exact \eqn{\mathrm{diag}(H^{-1})} for \eqn{H = H_{GN} + 2 v v^T} without
+#' forming a dense matrix.
 #'
-#' Block form with P the biological block, M the border block and C the coupling:
-#' \deqn{H = \begin{pmatrix} P & C \\ C^{\top} & M \end{pmatrix},\quad
-#'       P = D_b + 2 v_b v_b^{\top}.}
-#' The diagonal of the inverse follows from the block-inverse / Schur-complement
-#' identities, with \eqn{P^{-1}} handled by Sherman-Morrison (diagonal + rank-1).
+#' @param Hgn sparse symmetric Gauss-Newton Hessian.
+#' @param constrVec rank-1 constraint vector \eqn{v}, or `NULL`.
+#' @param bioIdx,borderIdx indices of the diagonal biological block and of the
+#'   remaining (border) parameters.
 #'
-#' @param Hgn sparse symmetric Gauss-Newton Hessian (the \code{hessian} returned
-#'   by \code{objFunction(sparseHessian = TRUE)}).
-#' @param constrVec rank-1 constraint vector (non-zero on biological parameters).
-#' @param bioIdx,borderIdx integer indices partitioning the parameters into the
-#'   diagonal biological block and the dense border.
-#'
-#' @return numeric vector \eqn{\mathrm{diag}(H^{-1})}, or \code{NULL} if the
-#'   biological block is not diagonal (unsupported structure).
+#' @return numeric vector, or `NULL` if the biological block is not diagonal.
 #'
 #' @noRd
 structuredDiagInverse <- function(Hgn, constrVec, bioIdx, borderIdx) {
@@ -420,7 +339,7 @@ structuredDiagInverse <- function(Hgn, constrVec, bioIdx, borderIdx) {
   }
 
   Db <- as.numeric(Matrix::diag(Hgn))[bioIdx]
-  ## Guard against zero/negative curvature (regularize minimally).
+  ## Floor zero or negative curvature at a small positive value
   posScale <- max(Db[is.finite(Db)], na.rm = TRUE)
   floorVal <- sqrt(.Machine$double.eps) * max(posScale, 1)
   Db <- pmax(Db, floorVal)
@@ -428,7 +347,7 @@ structuredDiagInverse <- function(Hgn, constrVec, bioIdx, borderIdx) {
 
   vb <- if (is.null(constrVec)) numeric(length(bioIdx)) else constrVec[bioIdx]
 
-  ## P^{-1} for P = diag(Db) + 2 vb vb' (Sherman-Morrison).
+  ## Sherman-Morrison for P = diag(Db) + 2 vb vb'
   z <- DbInv * vb
   denom <- 1 + 2 * sum(vb * z)
   diagPinv <- DbInv - 2 * z^2 / denom
@@ -448,14 +367,13 @@ structuredDiagInverse <- function(Hgn, constrVec, bioIdx, borderIdx) {
   W <- as.matrix(Matrix::Diagonal(x = DbInv) %*% C) -
     (2 / denom) * outer(z, zC)                              # n_b x m (dense)
 
-  ## Schur complement Sc = M - C' P^{-1} C and its (regularized) inverse.
+  ## Schur complement Sc = M - C' P^{-1} C, ridge-regularized if singular
   Sc <- Mb - as.matrix(Matrix::crossprod(C, W))
   ScInv <- tryCatch(solve(Sc), error = function(e) {
     ridge <- sqrt(.Machine$double.eps) * max(abs(diag(Sc)), 1)
     solve(Sc + diag(ridge, m))
   })
 
-  ## diag(H^{-1}): biological block = diag(P^{-1}) + rowwise quadratic form in Sc^{-1}
   WS <- W %*% ScInv
   diagBio <- diagPinv + rowSums(WS * W)
 
@@ -466,177 +384,24 @@ structuredDiagInverse <- function(Hgn, constrVec, bioIdx, borderIdx) {
 }
 
 
-
 # scaleTarget() ----------------------------------------------------------
 
-#' Scaling function applied to the current dataset
+#' Fit one block of data and build the output tables
 #'
-#' Heart of the package. The passed set is assumed to belong to one scale. The
-#' respective scaling factors are calculated by optimizing
-#' \link{objFunction}.
+#' @param currentData data frame of one block, see `splitForScaling()`.
+#' @param passParList list of settings and parsed expressions assembled by
+#'   `alignReplicates()`.
 #'
-#' @param currentData current data set, belongs to one scale.
-#' @param passParList from the the \code{passParList} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{effectsValues}}{
-#'      Named list of vectors. The names correspond to the effects and the
-#'      vectors contain the 'values'; the right hand side of the respective
-#'      effects parameters passed to \link{alignReplicates} the names of the columns
-#'      associated with the respective effect.
-#'  }
-#'  \item{\code{parameterData}}{
-#'      If the \code{data} parameter passed to \link{alignReplicates} is already an
-#'      output of \link{alignReplicates}, it contains the fitted parameters, otherwise
-#'      \code{NULL}.
-#'  }
-#'  \item{\code{averageTechRep}}{
-#'      Logical, if \code{TRUE} technical replicates, that can not be separated
-#'      by the respective \code{biological} and \code{scaling} values will be
-#'      averaged.
-#'  }
-#'  \item{\code{verbose}}{
-#'      Logical, if \code{TRUE} additional output will be generated.
-#'  }
-#'  \item{\code{covariates}}{
-#'      String, the covariates as defined by the (error-) model expressions as
-#'      defined in the respective parameters of \link{alignReplicates}
-#'  }
-#'  \item{\code{parameters}}{
-#'      Named vector, contains the variables for the three effects, and the
-#'      respective effects as names.
-#'  }
-#'  \item{\code{fitLogscale}}{
-#'      logical, defining if the parameters are fitted on a log scale.
-#'  }
-#'  \item{\code{effectsPars}}{
-#'      Similar to \code{parameters}, but as a named list.
-#'  }
-#'  \item{\code{modelExpr}}{
-#'      What is passed to \code{model} in \link{alignReplicates} but with the entries
-#'      of \code{parameters} replaced by the respective name (e.g. 'yi' is
-#'      replaced by 'biological'). The result is parsed as an expression.
-#'  }
-#'  \item{\code{errorModelExpr}}{
-#'      Same as \code{modelExpr} but with the value of \code{errorModel} from
-#'      \link{alignReplicates}.
-#'  }
-#'  \item{\code{constrExpr}}{
-#'      If \code{normalize} is set to \code{TRUE} in \link{alignReplicates},
-#'      \code{constrExpr} contains expression of the normalization
-#'      constraint, otherwise it is empty.
-#'  }
-#'  \item{\code{modelJacobianExpr}}{
-#'      Named list with the derivatives of \code{modelExpr} with respect to the
-#'      respective effects as entries.
-#'  }
-#'  \item{\code{errorModelJacobianExpr}}{
-#'      Analogue to \code{modelJacobianExpr} but with \code{errorModelExpr}.
-#'  }
-#'  \item{\code{constStrength}}{
-#'      Numerical 1000, if \code{normalize} is set to \code{TRUE} in
-#'      \link{alignReplicates}, otherwise unused.
-#'  }
-#'  \item{\code{normalize}}{
-#'      Logical, direct taken from the \code{normalize} parameter of
-#'      \link{alignReplicates}.
-#'  }
-#' }
-#'
-#' @return A list of \code{data.frame}S with the entries:
-#' \describe{
-#'  \item{\code{outPrediction}}{
-#'      \code{data.frame} with the columns \code{name}, \code{time},
-#'      \code{value}, \code{sigma}, \code{biological}, \code{scaling} and
-#'      \code{error}.
-#'
-#'      \code{values} contains the predictions by evaluation of the (error-)
-#'      model with the fitted parameters on the original scale (if
-#'      \code{normalizeInput} is set to \code{FALSE} in \link{alignReplicates}). The
-#'      last three columns contain strings pasted from the respective values of
-#'      the current entry.
-#'  }
-#'  \item{\code{outScaled}}{
-#'      \code{data.frame} with the original columns and additionally
-#'      \code{sigma} and \code{1}.
-#'
-#'      The \code{values} are the original ones scaled to common scale by
-#'      applying the inverse of the model with the fitted parameters. The
-#'      \code{sigma} entries are the results of the evaluated error model scaled
-#'      to common scale adhering to Gaussian error propagation.
-#'  }
-#'  \item{\code{outAligned}}{
-#'      \code{data.frame} with the original column names, the column
-#'      \code{value} contains the estimated biological parameters.
-#'
-#'      The \code{values} are estimated biological parameters, while the errors
-#'      \code{sigma} are from the Fisher information.
-#'  }
-#'  \item{\code{currentData}}{
-#'      \code{data.frame} with the original data with added columns \code{sigma}
-#'      and \code{1}.
-#'  }
-#'  \item{\code{outOrigParameters}}{
-#'      Same \code{data.frame} as \code{currentData} but with added columns for
-#'      the \code{parameters} ad the respective fitted values.
-#'  }
-#'  \item{\code{parTable}}{
-#'      \code{data.frame} with the columns:
-#'      \itemize{
-#'          \item{\code{level}:}{
-#'          String pasting all the unique effect entries.
-#'          }
-#'      }
-#'      \itemize{
-#'          \item{\code{parameter}:}{
-#'          Parameter associated with the current effect (compare with
-#'          \code{parameters}).
-#'          }
-#'      }
-#'      \itemize{
-#'          \item{\code{value}:}{
-#'          Value of the estimated parameters. The ones corresponding to the
-#'          biological parameters coincide with the \code{values} column of
-#'          \code{outAligned}.
-#'          }
-#'      }
-#'      \itemize{
-#'          \item{\code{sigma}:}{
-#'          Errors of the estemated parameter values by utilizing the Fisher
-#'          information
-#'          }
-#'      }
-#'      \itemize{
-#'          \item{\code{nll}:}{
-#'          Negative of twice the log likelihood of the fit in which the
-#'          paramters are estimated.
-#'          }
-#'      }
-#'      \itemize{
-#'          \item{\code{noPars}:}{
-#'          Number of fitted parameters (biological, scaling and error), minus
-#'          one if \code{normalize = TRUE} in the call of \link{alignReplicates}.
-#'          }
-#'      }
-#'      \itemize{
-#'          \item{\code{noData}:}{
-#'          Length of the current data file, i.e. number of measurements in the
-#'          set that is currently scaled.
-#'          }
-#'      }
-#'  }
-#' }
+#' @return list with `outPrediction`, `outScaled`, `outAligned`, `original`,
+#'   `outOrigParameters`, `parTable` and `multistart`, see the return value of
+#'   `alignReplicates()`.
 #'
 #' @importFrom nleqslv nleqslv
 #'
 #' @noRd
-
 scaleTarget <- function(currentData,
                         passParList) {
-
-  ## Retrieve parameters from list
   effectsValues <- passParList$effectsValues
-  parameterData <- passParList$parameterData
   averageTechRep <- passParList$averageTechRep
   verbose <- passParList$verbose
   covariates <- passParList$covariates
@@ -647,37 +412,23 @@ scaleTarget <- function(currentData,
   outputScale <-  passParList$outputScale
   optControls <- passParList$optControls
   multistart <- passParList$multistart
+  multistartSd <- passParList$multistartSd
+  cores <- passParList$cores
   rootControls <- passParList$rootControls
-
+  errorGroups <- passParList$errorGroups
 
   currentName <- unique(currentData$name)
-
-  ## Add column for error
+  userHasOne <- "1" %in% colnames(currentData)
   currentData$sigma <- NaN
-
-  ## Add a dummy column filled with 1
   currentData[["1"]] <- "1"
 
-  ## Initialize the parameter for the current target
-  currentParameter <- NULL
-
-  if (!is.null(parameterData)) {
-    currentParameter <- parameterData[
-      parameterData$name %in% currentData$name,
-    ]
-  }
-
-
-  ## Build a list of string of biological/scaling values present
   dataFitBiological <- do.call(
     paste_, currentData[, effectsValues[[1]], drop = FALSE]
   )
-
   dataFitScaling <- do.call(
     paste_, currentData[, effectsValues[[2]], drop = FALSE]
   )
 
-  ## Reducing datapoints
   if (averageTechRep) {
     if (verbose) {
       cat("Analyzing technical replicates ... ")
@@ -697,14 +448,11 @@ scaleTarget <- function(currentData,
         "data points that could not be distinguished by either ",
         "biological\nor scaling variables have been averaged.\n"
       )
-    } else {
-      if (verbose) {
-        cat("none found.\n")
-      }
+    } else if (verbose) {
+      cat("none found.\n")
     }
   }
 
-  ## compile dataset fit for fitting
   dataFit <- data.frame(
     currentData[
       ,
@@ -724,12 +472,16 @@ scaleTarget <- function(currentData,
     ),
     stringsAsFactors = FALSE
   )
+  for (p in names(errorGroups)) {
+    dataFit[[paste0("error_", p)]] <- do.call(
+      paste_, currentData[, errorGroups[[p]], drop = FALSE]
+    )
+  }
 
-  ## Retrieve (unique) list of biological, scaling and error values
-  levelsList <- list(
-    biological = unique(as.character(dataFit$biological)),
-    scaling = unique(as.character(dataFit$scaling)),
-    error = unique(as.character(dataFit$error))
+  ## Levels per effect class, named like the class columns of dataFit
+  levelsList <- lapply(
+    stats::setNames(nm = unique(c("biological", "scaling", "error", names(parameters)))),
+    function(e) unique(as.character(dataFit[[e]]))
   )
 
   initPars <- genInitPars(
@@ -737,16 +489,22 @@ scaleTarget <- function(currentData,
     fitLogscale,
     levelsList
   )
+  parLevels <- unlist(lapply(names(parameters), function(e) levelsList[[e]]),
+                      use.names = FALSE)
+  parSymbols <- rep(unname(parameters), lengths(levelsList[names(parameters)]))
+  initPars <- applyPreviousFit(
+    initPars, passParList$parameterData, currentName, parSymbols, parLevels,
+    fitLogscale
+  )
+  initPars <- applyParinit(
+    initPars, passParList$parinit, parSymbols, parLevels, fitLogscale
+  )
 
-  ## Sparse, allocation-light replacement for genMask(): one integer index
-  ## vector per model symbol instead of nPars dense 0/1 vectors of length noData.
   maskIdx <- buildMaskIndex(
     parameters,
     levelsList,
     dataFit
   )
-
-  fitParsBiological <- NULL
 
   if (verbose) {
     cat("Starting fit\n")
@@ -755,7 +513,6 @@ scaleTarget <- function(currentData,
   passParList2 <- list(
     dataFit = dataFit,
     levelsList = levelsList,
-    fitParsBiological = fitParsBiological,
     effectsPars = effectsPars,
     maskIdx = maskIdx,
     initPars = initPars
@@ -763,9 +520,7 @@ scaleTarget <- function(currentData,
 
   # * call of trust() function ----------------------------------------------
 
-  ## Use the sparse, structure-exploiting optimizer once the parameter count
-  ## makes a dense K x K Hessian / eigensolve too large; otherwise the dense
-  ## C++ kernel.
+  ## Above the threshold a dense Hessian is too large: use the sparse optimizer
   nPars <- length(initPars)
   structuredThreshold <- if (!is.null(optControls$structuredThreshold)) {
     optControls$structuredThreshold
@@ -778,7 +533,22 @@ scaleTarget <- function(currentData,
     cat("Using sparse structured optimizer (", nPars, " parameters).\n", sep = "")
   }
 
-  ## Build trust() arguments from optControls
+  ## Parameters without influence on the likelihood stay at their start value
+  ## and are reported as NA.
+  inactive <- findInactivePars(initPars, passParList, passParList2)
+  freeIdx <- seq_along(initPars)
+  fitInit <- initPars
+  if (length(inactive)) {
+    freeIdx <- setdiff(freeIdx, inactive)
+    fitInit <- initPars[freeIdx]
+    passParList2$fixedPars <- initPars[inactive]
+    passParList2$freeIdx <- freeIdx
+    if (verbose) {
+      cat("Fixed without influence on the likelihood:",
+          names(initPars)[inactive], "\n")
+    }
+  }
+
   trustArgs <- list(
     objfun    = objFunction,
     parinit   = initPars,
@@ -796,30 +566,46 @@ scaleTarget <- function(currentData,
     trustArgs$parscale <- optControls$parscale
   }
 
-  ## --- Multistart --------------------------------------------------------
-  ## Run trust() once from the default init; if multistart > 1, also run
-  ## from (multistart - 1) random perturbations and keep the best result.
-
-  runTrust <- function(parinit) {
+  ## Start 1 is the initial point, the others perturb it. Perturbations are
+  ## drawn here, before any fit, so results do not depend on `cores`.
+  starts <- c(
+    list(fitInit),
+    lapply(seq_len(multistart - 1L), function(i) {
+      fitInit + rnorm(length(fitInit), mean = 0, sd = multistartSd)
+    })
+  )
+  runStart <- function(parinit) {
     args <- trustArgs
     args$parinit <- parinit
-    do.call(trust, args)
+    tryCatch(do.call(trust, args), error = function(e) e)
+  }
+  fits <- if (cores > 1L && multistart > 1L) {
+    parallel::mclapply(starts, runStart, mc.cores = cores)
+  } else {
+    lapply(starts, runStart)
+  }
+  if (inherits(fits[[1]], "error")) stop(fits[[1]])
+  isFit <- vapply(fits, function(f) is.list(f) && !is.null(f$argument), TRUE)
+
+  fitResult <- fits[[1]]
+  for (f in fits[-1][isFit[-1]]) {
+    if (f$converged && f$value < fitResult$value) fitResult <- f
   }
 
-  ## First run from default initPars
-  fitResult <- runTrust(initPars)
-
-  if (multistart > 1L) {
-    if (verbose) cat("Multistart: running", multistart - 1L, "additional starts ... ")
-    for (ms in seq_len(multistart - 1L)) {
-      initParsPerturbed <- initPars + rnorm(length(initPars), mean = 0, sd = 3)
-      msResult <- tryCatch(runTrust(initParsPerturbed), error = function(e) NULL)
-      if (!is.null(msResult) && msResult$converged && msResult$value < fitResult$value) {
-        fitResult <- msResult
-      }
-    }
-    if (verbose) cat("done\n")
-  }
+  multistartTable <- data.frame(
+    name = currentName,
+    start = seq_along(fits),
+    value = vapply(seq_along(fits), function(i) {
+      if (isFit[i]) fits[[i]]$value else NA_real_
+    }, 0),
+    converged = vapply(seq_along(fits), function(i) {
+      isFit[i] && isTRUE(fits[[i]]$converged)
+    }, TRUE),
+    iterations = vapply(seq_along(fits), function(i) {
+      if (isFit[i]) as.integer(fits[[i]]$iterations) else NA_integer_
+    }, 0L),
+    stringsAsFactors = FALSE
+  )
 
   if (!fitResult$converged) {
     warning(paste("Non-converged fit for target", currentName))
@@ -834,13 +620,22 @@ scaleTarget <- function(currentData,
     calcDeriv = FALSE
   )
 
+  if (identical(passParList$likelihood, "t")) {
+    info <- objFunction(
+      fitResult$argument, passParList,
+      c(passParList2, list(expectedInfo = TRUE))
+    )
+    fitResult$hessian <- info$hessian
+    fitResult$constrVec <- info$constrVec
+  }
+
+  nFree <- length(fitResult$argument)
   bessel <- sqrt(
-    nrow(dataFit) / (nrow(dataFit) - length(initPars) +
+    nrow(dataFit) / (nrow(dataFit) - nFree +
                        normalize)
   )
 
-  ## Singular-value diagnostic (dense path only; a dense SVD is infeasible at
-  ## the parameter counts of the structured path).
+  ## Dense path only, an SVD is infeasible at structured-path sizes
   if (!isTRUE(passParList$sparseHessian)) {
     singleValues <- svd(fitResult[["hessian"]])[["d"]]
     tol <- sqrt(.Machine$double.eps)
@@ -851,10 +646,7 @@ scaleTarget <- function(currentData,
     }
   }
 
-  ## Diagonal of (twice) the inverse Fisher information, used below for every
-  ## parameter sigma. Small path: dense pseudo-inverse (MASS::ginv). Large path:
-  ## structured arrow + rank-1 diagonal-of-inverse, which never forms the dense
-  ## nPars x nPars matrix.
+  ## Diagonal of twice the inverse Fisher information, for all parameter sigmas
   if (isTRUE(passParList$sparseHessian)) {
     effects <- names(parameters)
     nlevPar <- vapply(effects, function(e) length(levelsList[[e]]), integer(1))
@@ -863,7 +655,8 @@ scaleTarget <- function(currentData,
       which(effects == "biological"),
       function(k) as.integer(offs[k]) + seq_len(nlevPar[k])
     ))
-    borderIdx <- setdiff(seq_len(length(initPars)), bioIdx)
+    bioIdx <- stats::na.omit(match(bioIdx, freeIdx))
+    borderIdx <- setdiff(seq_along(freeIdx), bioIdx)
     diagInv <- structuredDiagInverse(
       Hgn = fitResult$hessian,
       constrVec = fitResult$constrVec,
@@ -879,36 +672,26 @@ scaleTarget <- function(currentData,
   } else {
     diag2Inv <- diag(2 * MASS::ginv(fitResult$hessian))
   }
+  diag2InvFull <- rep(NA_real_, length(initPars))
+  diag2InvFull[freeIdx] <- diag2Inv
+  parValues <- rep(NA_real_, length(initPars))
+  parValues[freeIdx] <- fitResult$argument
+  names(parValues) <- names(initPars)
 
   # * parameter table -------------------------------------------------------
-  # Generate parameter table
 
   parTable <- data.frame(
     name = currentName,
-    level = c(
-      rep(levelsList[[1]], length(effectsPars[[1]])),
-      rep(levelsList[[2]], length(effectsPars[[2]])),
-      rep(levelsList[[3]], length(effectsPars[[3]]))
-    ),
-    parameter = names(fitResult$argument),
-    value = fitResult$argument,
-
-
-
+    level = parLevels,
+    parameter = names(parValues),
+    value = parValues,
     nll = fitResult$value,
-    noPars = length(fitResult$argument) - normalize,
+    noPars = nFree - normalize,
     noData = nrow(dataFit)
   )
 
-  ## Calculating the error from the inverse of the Fisher information
-  ## matrix which is in this case the Hessian, to which the above
-  ## calculated Bessel correction is applied.
-  parTable$sigma <- sqrt(diag2Inv) * bessel
+  parTable$sigma <- sqrt(diag2InvFull) * bessel
 
-
-
-
-  ## transform parameters back if fitted on log scale
   if (fitLogscale == TRUE) {
     parTable$value <- exp(parTable$value)
     parTable$sigma <- parTable$value * parTable$sigma
@@ -924,36 +707,27 @@ scaleTarget <- function(currentData,
       fitResult$iterations, "\n"
     )
     cat("-2*LL: ", fitResult$value, "on", nrow(currentData) +
-          normalize - length(fitResult$argument), "degrees of freedom\n")
+          normalize - nFree, "degrees of freedom\n")
   }
 
   attr(parTable, "value") <- fitResult$value
-  attr(parTable, "df") <- nrow(currentData) + normalize -
-    length(fitResult$argument)
-
+  attr(parTable, "df") <- nrow(currentData) + normalize - nFree
 
   # * outPrediction --------------------------------------------------------
-  ## Predicted data
+
   outPrediction <- currentData
   outPrediction$value <- fitResult$prediction
   outPrediction$sigma <- fitResult$sigma * bessel
   outPrediction$lower <- outPrediction$value - outPrediction$sigma
   outPrediction$upper <- outPrediction$value + outPrediction$sigma
 
-
-
-
-
   # * outScaled ------------------------------------------------------------
-  ## Initialize list for scaled values
+
+  ## Analytic inverse if available, otherwise numeric inversion with nleqslv
   initialValuesScaled <- rep(0, nrow(currentData))
   if (verbose) {
     cat("Inverting model ... ")
   }
-
-  ## -------------------------------------------------------------------
-  ## Strategy: try analytical inverse first, fall back to nleqslv.
-  ## -------------------------------------------------------------------
 
   analyticResult <- evaluateAnalyticInverse(
     parList = residualsFit[-1],
@@ -962,20 +736,18 @@ scaleTarget <- function(currentData,
   )
 
   if (!is.null(analyticResult)) {
-    ## Analytical inverse succeeded
     valuesScaled <- analyticResult$values
     myDeriv <- analyticResult$jacobian
     if (verbose) cat("done (analytic)\n")
 
   } else {
-    ## Fallback: numerical inversion via nleqslv
     if (verbose && !is.null(passParList$analyticInverseExpr)) {
       cat("analytic eval failed, falling back to nleqslv ... ")
     }
 
     n_data <- length(initialValuesScaled)
 
-    ## Wrapper: nleqslv expects jac to return a matrix
+    ## nleqslv expects the Jacobian as a matrix
     jacWrapper <- function(x, ...) {
       dv <- as.numeric(evaluateModelJacobian(x, ...))
       n <- length(dv)
@@ -984,13 +756,11 @@ scaleTarget <- function(currentData,
       J
     }
 
-    ## Build nleqslv arguments, strip reserved names from rootControls
     reservedNames <- c("x", "fn", "jac", "parList", "passParList",
                        "passParList2")
     safeRootControls <- rootControls[
       !names(rootControls) %in% reservedNames
     ]
-    ## Default to allowSingular for robustness
     if (is.null(safeRootControls$control)) {
       safeRootControls$control <- list(allowSingular = TRUE)
     } else if (is.null(safeRootControls$control$allowSingular)) {
@@ -1039,15 +809,12 @@ scaleTarget <- function(currentData,
     if (verbose) cat("done (numeric)\n")
   }
 
-  ## --- Build outScaled from inversion result ----------------------------
   if (inherits(valuesScaled, "try-error")) {
     outScaled <- NULL
     warning("Rescaling to common scale not possible for target ",
             currentName, ". Equations not invertible.")
   } else {
     sigmasScaled <- fitResult$sigma * bessel / myDeriv
-
-    # transform parameters back if fitted on log scale
     if (fitLogscale == TRUE) {
       valuesScaled <- exp(valuesScaled)
       sigmasScaled <- valuesScaled * sigmasScaled
@@ -1062,18 +829,14 @@ scaleTarget <- function(currentData,
     outScaled$lower <- lowerScaled
   }
 
-
   # * outAligned -----------------------------------------------------------
-  noInitial <- length(levelsList[[1]])
 
-  ## Use one datapoint per unique set of fixed parameters
+  ## One row per biological level
   outAligned <- currentData[
     !duplicated(dataFit$biological),
     intersect(effectsValues[[1]], colnames(currentData))
   ]
 
-  ## The values are the fitted parameters for the respective fixed
-  ## parameter ensembles.
   outAligned$value <- residualsFit[[effectsPars[[1]][1]]]
   outAligned$parameter <- c(
     do.call(
@@ -1093,9 +856,8 @@ scaleTarget <- function(currentData,
     )
   )
 
-  outAligned$sigma <- sqrt(diag2Inv)[seq_len(noInitial)] * bessel
-
-  # transform parameters back if fitted on log scale
+  outAligned$sigma <- sqrt(diag2InvFull)[parSymbols == effectsPars[[1]][1]] *
+    bessel
   if (fitLogscale == TRUE) {
     outAligned$value <- exp(outAligned$value)
     outAligned$sigma <- outAligned$value * outAligned$sigma
@@ -1103,17 +865,13 @@ scaleTarget <- function(currentData,
   outAligned$lower <- outAligned$value - outAligned$sigma
   outAligned$upper <- outAligned$value + outAligned$sigma
 
-
   # * outOrigParameters -------------------------------------------------
+
   outOrigParameters <- currentData
   for (k in seq_along(parameters)) {
     effect <- names(parameters)[k]
     useLevels <- as.character(dataFit[[effect]])
-    index0 <- which(
-      as.character(
-        gsub('[_0-9]+', '', parTable$parameter)
-      ) == parameters[k]
-    )
+    index0 <- which(parSymbols == parameters[k])
     index1 <- match(useLevels, as.character(parTable$level[index0]))
     index <- index0[index1]
     outOrigParameters[[parameters[k]]] <- parTable$value[index]
@@ -1123,84 +881,50 @@ scaleTarget <- function(currentData,
     outScaled = outScaled,
     outAligned = outAligned,
     original = currentData,
-    outOrigParameters = outOrigParameters,
-    parTable = parTable
+    outOrigParameters = outOrigParameters
   )
-
-
-
+  if (!userHasOne && !"1" %in% unlist(effectsValues)) {
+    out <- lapply(out, function(tab) {
+      if (!is.null(tab)) tab[["1"]] <- NULL
+      tab
+    })
+  }
+  out$parTable <- parTable
+  out$multistart <- multistartTable
 
   return(out)
 }
 
 
-
 # genInitPars() -------------------------------------------------
 
-#' Method to generate a set of initial parameters for \link{scaleTarget}
+#' Default initial parameters
 #'
-#' @param parameters Named vector, contains the variables for the three effects,
-#' and the respective effects as names.
-#' @param fitLogscale logical, identifying if the parameters are
-#' fited on log scale
-#' @param levelsList Named list with one entry per effect containing a vector
-#' of strings composed with the respective pasted entries of the effects columns
+#' @param parameters named character vector of model symbols, names are the
+#'   effect classes.
+#' @param fitLogscale logical; start value is 0 if `TRUE`, else 1.
+#' @param levelsList named list of levels per effect class.
 #'
-#' @return Named vector with one entry per parameter, all are 1 if
-#' \code{fitLogscale = TRUE} and 0 if not. The names are the entries
-#' of \code{parameters} of the corresponding effect. Each entry is repeated as
-#' often as there are parameters of the respective effect.
+#' @return numeric vector with one entry per symbol and level, named
+#'   `<symbol>_<index>` with a running index.
 #'
 #' @noRd
-
 genInitPars <- function(parameters,
                         fitLogscale,
                         levelsList) {
-  ## Create a named vector with initial values for all parameters. The name
-  ## is the parameter, and the initial value is 0 for log and 1 for linear.
-  ## each parameter name-value entry is repeated as many times as there are
-  ## measurements of the i'th target with this parameter.
-  ## Example: biological is passed as "ys ~ condition", so the entry with name
-  ##   "ys" will be repeated for as many times as there are measurements
-  ##   with the same "condition" entry.
   initPars <- do.call(
     "c",
     lapply(
       seq_along(parameters),
-      ## Go through all parameters with current parameter n
       function(n) {
-        if (fitLogscale == TRUE) {
-          v <- 0
-        } else {
-          v <- 1
-        }
-        ## Let l be the number of measurements of same type (biological,
-        ## scaling or error) for the current n
-        l <- switch(
-          ## Get "biological", "scaling" or "error" from the current n
-          names(parameters)[n],
-          biological = length(levelsList[[1]]),
-          scaling = length(levelsList[[2]]),
-          error = length(levelsList[[3]])
-        )
-
-        ## Get the n'th parameter
+        v <- if (fitLogscale == TRUE) 0 else 1
+        l <- length(levelsList[[names(parameters)[n]]])
         p <- as.character(parameters[n])
-
-        ## The variable "parValues" will have l times the entry
-        ## "v" (0 for log, 1 for linear) with the corresponding
-        ## parameter as the name.
-        parValues <-
-          structure(
-            rep(v, l),
-            names = rep(p, l)
-          )
-        return(parValues)
+        structure(rep(v, l), names = rep(p, l))
       }
     )
   )
 
-  ## give intividual names
   names(initPars) <- paste(
     names(initPars),
     seq_along(initPars),
@@ -1211,33 +935,96 @@ genInitPars <- function(parameters,
 }
 
 
-# genMask() ---------------------------------------------------------
+# applyParinit() ---------------------------------------------------------
 
-#' Creates a identifier list
+#' Overwrite default initial values with user-supplied ones
 #'
-#' A list with one element per entry in initPars is generated. For
-#' each of those elements, it is checked which elements of the data set
-#' \code{dataFit} coincides with the current element of \code{allLevels}.
-#' The entry is a list with 1 indicating where the current element of
-#' \code{allLevels} is found in the respective effect-column of
-#' \code{dataFit}.
-#' Keep in mind, that the \code{initPars} and \code{allLevels} are
-#' structured analogue.
+#' @param initPars output of `genInitPars()`.
+#' @param parinit `NULL` or named list, see `parinit` in [alignReplicates()].
+#' @param parSymbols,parLevels model symbol and level of each entry of
+#'   `initPars`.
+#' @param fitLogscale logical; values are log-transformed if `TRUE`.
 #'
-#' @param initPars named vector, set of parameters as output of
-#' \link{genInitPars}
-#' @param parameters named vector, with the 'values' of the three effects
-#' @param allLevels character vector, strings describing all levels in the
-#' current data set
-#' @param dataFit data frame containing the data that will be fitted
-#'
-#' @return list with one entry per entry of \code{allLevels}. Each of this
-#' entries is a numerical list of the length of \code{dataFit}. The entries are
-#' either 1, if the corresponding entry of \code{dataFit} is resembled by the
-#' current entry of \code{allLevels}.
+#' @return `initPars` with the supplied entries replaced.
 #'
 #' @noRd
+applyParinit <- function(initPars, parinit, parSymbols, parLevels, fitLogscale) {
+  for (p in names(parinit)) {
+    idx <- which(parSymbols == p)
+    v <- parinit[[p]]
+    if (!is.null(names(v))) {
+      idx <- idx[parLevels[idx] %in% names(v)]
+      v <- v[parLevels[idx]]
+    }
+    initPars[idx] <- if (fitLogscale) log(v) else v
+  }
+  initPars
+}
 
+
+# applyPreviousFit() -----------------------------------------------------
+
+#' Start values from the parameter table of a previous fit
+#'
+#' @param prev `NULL` or the `parameter` table of an [alignReplicates()] result.
+#' @inheritParams applyParinit
+#' @param currentName name of the current target.
+#'
+#' @return `initPars` with the entries found in `prev` replaced.
+#'
+#' @noRd
+applyPreviousFit <- function(initPars, prev, currentName, parSymbols,
+                             parLevels, fitLogscale) {
+  if (is.null(prev)) return(initPars)
+  prev <- prev[as.character(prev$name) == currentName & is.finite(prev$value), ]
+  if (fitLogscale) prev <- prev[prev$value > 0, ]
+  key <- paste(sub("_[0-9]+$", "", prev$parameter), prev$level, sep = "\r")
+  idx <- match(paste(parSymbols, parLevels, sep = "\r"), key)
+  hit <- !is.na(idx)
+  v <- prev$value[idx[hit]]
+  initPars[hit] <- if (fitLogscale) log(v) else v
+  initPars
+}
+
+
+# findInactivePars() -----------------------------------------------------
+
+#' Indices of parameters without influence on the likelihood
+#'
+#' A parameter is inactive if its gradient entry and Hessian row vanish at
+#' `initPars` and at a shifted point.
+#'
+#' @return integer vector of indices into `initPars`.
+#'
+#' @noRd
+findInactivePars <- function(initPars, passParList, passParList2) {
+  inactive <- rep(TRUE, length(initPars))
+  for (x in list(initPars, initPars + 0.1)) {
+    o <- objFunction(x, passParList, passParList2)
+    if (is.null(o$gradient)) return(integer(0))
+    hessRowZero <- Matrix::colSums(abs(o$hessian)) == 0
+    if (!is.null(o$constrVec)) hessRowZero <- hessRowZero & o$constrVec == 0
+    inactive <- inactive & o$gradient == 0 & hessRowZero
+  }
+  which(inactive)
+}
+
+
+# genMask() ---------------------------------------------------------
+
+#' Dense 0/1 activation masks, one per parameter
+#'
+#' Superseded by `buildMaskIndex()`, which holds the same information as index
+#' vectors.
+#'
+#' @param initPars output of `genInitPars()`.
+#' @param parameters named character vector of model symbols.
+#' @param allLevels level of each entry of `initPars`.
+#' @param dataFit data frame with the effect class columns.
+#'
+#' @return list of numeric 0/1 vectors of length `nrow(dataFit)`.
+#'
+#' @noRd
 genMask <- function(initPars,
                     parameters,
                     allLevels,
@@ -1264,33 +1051,21 @@ genMask <- function(initPars,
 }
 
 
-
 # buildMaskIndex() --------------------------------------------------------
 
 #' Index-based parameter activation map
 #'
-#' Each data point activates exactly one parameter per model symbol (its
-#' biological, scaling and error level). \code{buildMaskIndex} encodes this as
-#' one integer index vector per symbol (length \code{noData}) holding the global
-#' parameter index activated by each data point, so the objective assembles its
-#' gradient and Hessian in \eqn{O(noData \cdot nSymbols)}. \link{genMask} encodes
-#' the same information as \eqn{nPars} dense 0/1 vectors, which is
-#' \eqn{O(noData \cdot nPars)} and infeasible at large \code{nPars}.
+#' Each data point activates exactly one parameter per model symbol. Parameters
+#' are ordered as in `genInitPars()`.
 #'
-#' The parameter ordering follows \link{genInitPars}: symbols are concatenated in
-#' the order of \code{parameters}, each symbol contributing one parameter per
-#' level in \code{levelsList[[effect]]}.
+#' @param parameters named character vector of model symbols, names are the
+#'   effect classes.
+#' @param levelsList named list of levels per effect class.
+#' @param dataFit data frame with the effect class columns.
 #'
-#' @param parameters named vector mapping model symbols (e.g. "yi") to their
-#'   effect class via the names ("biological"/"scaling"/"error").
-#' @param levelsList named list with one character vector of levels per effect.
-#' @param dataFit data frame with the pasted effect columns "biological",
-#'   "scaling" and "error".
-#'
-#' @return list with entries \code{gidx} (list of integer index vectors, one per
-#'   symbol), \code{nPars}, \code{constrIdx} (global indices of the first
-#'   biological symbol's parameters, which carry the normalization constraint)
-#'   and \code{constrDenom} (number of biological levels).
+#' @return list with `gidx` (per symbol, the global parameter index of each data
+#'   point), `nPars`, `constrIdx` (indices of the first biological symbol, which
+#'   the normalization constraint acts on) and `constrDenom` (their number).
 #'
 #' @noRd
 buildMaskIndex <- function(parameters, levelsList, dataFit) {
@@ -1300,7 +1075,6 @@ buildMaskIndex <- function(parameters, levelsList, dataFit) {
   offsets <- cumsum(c(0L, nlev))[seq_len(S)]
   nPars <- sum(nlev)
 
-  ## For each symbol, the global parameter index activated by each data point.
   gidx <- lapply(
     seq_len(S),
     function(k) {
@@ -1309,15 +1083,12 @@ buildMaskIndex <- function(parameters, levelsList, dataFit) {
     }
   )
 
-  ## The normalization constraint acts on the first biological symbol only; its
-  ## per-parameter weight is constStrength / (number of biological levels).
   firstBio <- which(effects == "biological")[1]
+  constrIdx <- integer(0)
+  constrDenom <- 1L
   if (!is.na(firstBio)) {
     constrIdx <- as.integer(offsets[firstBio]) + seq_len(nlev[firstBio])
     constrDenom <- nlev[firstBio]
-  } else {
-    constrIdx <- integer(0)
-    constrDenom <- 1L
   }
 
   list(
@@ -1329,84 +1100,44 @@ buildMaskIndex <- function(parameters, levelsList, dataFit) {
 }
 
 
-
 # resolveFunction() -----------------------------------------------------
 
-#' Function to sort the current set of parameters into the three effect
-#' categories.
+#' Split the parameter vector by symbol and evaluate the residuals
 #'
-#' Additionally, residuals of model evaluations for the set of
-#' \code{currentPars} \code{fitParsBiological} are calculated by
-#' evaluation of \link{rssModel}.
+#' @param currentPars named parameter vector, without fixed parameters.
+#' @param passParList,passParList2 settings, see `scaleTarget()`.
+#' @param calcDeriv logical, passed to `rssModel()`.
 #'
-#' @param currentPars named vector of vectors to be tested currently
-#' @param passParList from the the \code{passParList} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{parameters}}{Named list of the parameters of the three effects,
-#'  the names are the respective effects}
-#' }
-#' @param passParList2 from the the \code{passParList2} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{fitParsBiological}}{TODO: Check if it is always \code{NULL}?}
-#'  \item{\code{levelsList}}{Named list of vectors. One entry per effect with
-#'  the respective name. The entry contains a list of the unique strings
-#'  composed from the entries of \code{effect_values} of the respective effect,
-#'  i.e. the entries of the columns containing e.g. the biological-effects
-#'  (name, time, condition etc.).}
-#'  \item{\code{effectsPars}}{Named list of vectors. One entry per effect with
-#'  the respective name. The entry then contains the string of the effect
-#'  parameter, i.e. the variable name (e.g. "sj" for scaling).}
-#' }
-#'
-#' @return named list of the residuals calculated in \link{rssModel} and the
-#' \code{currentPars} sorted in the effects with the respective entries
-#' from \code{levelsList} as names.
+#' @return list with `residuals` from `rssModel()` and one named vector per
+#'   model symbol, named by level.
 #'
 #' @noRd
-#'
 resolveFunction <- function(currentPars,
                             passParList,
                             passParList2,
                             calcDeriv) {
-  if (FALSE) {
-    currentPars <- initPars
-  }
-
-
   parameters <- passParList$parameters
-  fitParsBiological <- passParList2$fitParsBiological
   levelsList <- passParList2$levelsList
-  effectsPars <- passParList2$effectsPars
 
-  parsAll <- c(currentPars, fitParsBiological)
+  ## Fixed parameters are merged back in global index order
+  parsAll <- currentPars
+  fixedPars <- passParList2$fixedPars
+  if (!is.null(fixedPars)) {
+    parsAll <- c(currentPars, fixedPars)
+    parsAll <- parsAll[order(as.integer(sub(".*_", "", names(parsAll))))]
+  }
+  parClass <- getParClass(parsAll)
   parList <- lapply(
-    parameters,
-    function(n) {
-      parClass <- gsub('[_0-9]+', '', names(parsAll))
-      subpar <- parsAll[parClass == n]
-      if (n %in% effectsPars[[1]]) {
-        ## Rename entries of the first list (fixed)
-        names(subpar) <- levelsList[[1]]
-      }
-      if (n %in% effectsPars[[2]]) {
-        ## Rename entries of the second list (latent)
-        names(subpar) <- levelsList[[2]]
-      }
-      if (n %in% effectsPars[[3]]) {
-        ## Rename entries of the third list (error)
-        names(subpar) <- levelsList[[3]]
-      }
-      return(subpar)
+    seq_along(parameters),
+    function(k) {
+      subpar <- parsAll[parClass == parameters[k]]
+      names(subpar) <- levelsList[[names(parameters)[k]]]
+      subpar
     }
   )
 
-  ## Rename the thre lists
   names(parList) <- parameters
 
-  ## Create list of residuals and attach the corresponding current
-  ## parameters
   c(
     list(
       residuals = rssModel(
@@ -1421,47 +1152,16 @@ resolveFunction <- function(currentPars,
 }
 
 
-
 # rssModel() -------------------------------------------------------------
 
-#' Calculate model residuals
+#' Weighted residuals, variances and constraint
 #'
-#' Residuals are calculated by the difference (prediction - value), where
-#' \code{prediction} is the evaluation of the model with the current set of
-#' parameters and \code{value} the respective measurements. Optionally, the
-#' derivatives are also calculated
+#' @param parList named list with one vector per model symbol, named by level.
+#' @param passParList,passParList2 settings, see `scaleTarget()`.
+#' @param calcDeriv logical; if `TRUE`, the derivatives with respect to each
+#'   symbol are attached as attributes `residualDeriv` and `varianceDeriv`.
 #'
-#'
-#' @param parList Named list with one entry per effect (with the respective
-#' name). The entry contains a named vector with the unique stings of the
-#' respective effect values i.e. the entries of the respective columns (e.g.
-#' name, time, condition etc. for 'biological')
-#' @param passParList from the the \code{passParList} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{modelExpr}}{The argument of the \code{model} parameter of
-#'  \link{alignReplicates} parsed as an executable expression.}
-#'  \item{\code{errorModelExpr}}{The argument of the \code{errorModel}
-#'  parameter of \link{alignReplicates} parsed as en executable expression.}
-#'  \item{\code{constrExpr}}{If the logical argument \code{normalize} of
-#'  \link{alignReplicates} is set to \code{TRUE}, an executable constraint expression
-#'  is passed. If \code{normalize = FALSE} it is empty.}
-#'  \item{\code{modelJacobianExpr}}{The Jacobian of the model as a named list
-#'  with the respective derivatives as entries passed as expression.}
-#'  \item{\code{errorModelJacobianExpr}}{The Jacobian of the error model as a
-#'  named list with the respective derivatives as entries passed as expression.}
-#' }
-#'
-#' @param passParList2 from the the \code{passParList2} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{dataFit}}{The current dataset}
-#' }
-#'
-#' @param calcDeriv logical, if \code{TRUE}, derivatives will also be
-#' calculated.
-#'
-#' @return list of residuals with the derivatives (optional) as attributes.
+#' @return numeric vector: residuals divided by sigma, variances, constraint.
 #'
 #' @noRd
 rssModel <- function(parList,
@@ -1477,53 +1177,24 @@ rssModel <- function(parList,
   dataFit <- passParList2$dataFit
 
   with(
-    ## paste list with entries: name, time, value, sigma, the effects and
-    ## their paramters
     c(as.list(dataFit), parList), {
-      if(F) {
-        name <- c(as.list(dataFit), parList)$name
-        time <- c(as.list(dataFit), parList)$time
-        value <- c(as.list(dataFit), parList)$value
-        sigma <- c(as.list(dataFit), parList)$sigma
-        biological <- c(as.list(dataFit), parList)$biological
-        scaling <- c(as.list(dataFit), parList)$scaling
-        error <- c(as.list(dataFit), parList)$error
-        yi <- c(as.list(dataFit), parList)$yi
-        sj <- c(as.list(dataFit), parList)$sj
-        sigmaR <- c(as.list(dataFit), parList)$sigmaR
-        sigmaA <- c(as.list(dataFit), parList)$sigmaA
-      }
-      ## Generate lists var and prediction with <NoOfMeasurements> entries
-      ## and initialize the it with 1
+      ## Binding for R CMD check, never executed
+      if (FALSE) value <- NULL
+
+      ## Assignment into a vector recycles scalar model results to all points
       prediction <- var <- rep(1, length(value))
-
-      ## Get the prediction by evaluating the model
       prediction[seq_along(prediction)] <- eval(modelExpr)
-
-      ## Create residuals: differences between prediction and measurements
       res <- prediction - value
-
-      ## Generate variances by squaring the evaluated error model
       var[seq_along(var)] <- eval(errorModelExpr)^2
-
-      ## Evaluate constraints
       constr <- eval(constrExpr)
-
-      ## Create list of residuals
       residuals <- c(res / sqrt(var), var, constr)
 
-      ## Initialize variables for derivatives
       residualDeriv <- varianceDeriv <- NULL
-
-      ## Calculate derivatives if wished
       if (calcDeriv) {
         jac <- lapply(
           seq_len(length(parList)),
           function(k) {
-            ## Initialize lists
             vMod <- vErr <- rep(0, length(value))
-
-            ## Get derivatives for model and errormodel
             vMod[seq_len(length(value))] <- eval(
               modelJacobianExpr[[k]]
             )
@@ -1551,72 +1222,32 @@ rssModel <- function(parList,
 
 # objFunction() ----------------------------------------------------
 
-#' Objective function for trust region optimizer
+#' Objective function for `trust()`
 #'
-#' @param currentPars Current set of parameters to be tested. Will be
-#' iteratively changed by the objective function.
-#' @param passParList from the the \code{passParList} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{parameters}}{
-#'      Named vector, contains the variables for the three effects, and the
-#'      respective effects as names.
-#'  }
-#'  \item{\code{fitLogscale}}{
-#'      Logical, defining the parameter fit scale. See
-#'      \code{fitLogscale} in \link{alignReplicates}.
-#'  }
-#'  \item{\code{constStrength}}{
-#'      Numerical 1000, if \code{normalize} is set to \code{TRUE} in
-#'      \link{alignReplicates}, otherwise unused.
-#'  }
-#' }
+#' @param currentPars named parameter vector, without fixed parameters.
+#' @param passParList,passParList2 settings, see `scaleTarget()`.
+#' @param calcDeriv logical; if `TRUE`, gradient and Gauss-Newton Hessian are
+#'   returned.
 #'
-#' @param passParList2 from the the \code{passParList2} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{dataFit}}{
-#'      The current data set
-#'  }
-#'  \item{\code{levelsList}}{Named list of vectors. One entry per effect with
-#'      the respective name. The entry contains a list of the unique strings
-#'      composed from the entries of \code{effect_values} of the respective
-#'      effect, i.e. the entries of the columns containing e.g. the biological
-#'      effects (name, time, condition etc.).
-#'  }
-#'  \item{\code{mask}}{
-#'      Output of \link{genMask}
-#'  }
-#' }
-#'
-#' @param calcDeriv Logical, indicates if derivatives should be also
-#' calculated.
-#'
-#' @return named list with the entries \code{value}, \code{gradient} and
-#' \code{hessian}. The \code{value}S are the residual sum of squares with the
-#' residuals as calculated by \link{rssModel} (via \link{resolveFunction}).
+#' @return list with `value` (\eqn{-2 \log L}), `gradient`, `hessian`,
+#'   `constrVec` (rank-1 constraint term, sparse path only), `prediction` and
+#'   `sigma`. Non-finite results are returned as `value = Inf` without
+#'   derivatives.
 #'
 #' @noRd
 objFunction <- function(currentPars,
                         passParList,
                         passParList2,
                         calcDeriv = TRUE) {
-  if (FALSE) {
-    currentPars <- initPars
-    calcDeriv <- TRUE
-  }
-
   parameters <- passParList$parameters
   fitLogscale <- passParList$fitLogscale
   constStrength <- passParList$constStrength
 
   dataFit <- passParList2$dataFit
   levelsList <- passParList2$levelsList
-  mask <- passParList2$mask
 
   noData <- nrow(dataFit)
 
-  ## Recover residuals from output of res_fn()
   calculatedResiduals <- resolveFunction(
     currentPars = currentPars,
     passParList = passParList,
@@ -1624,105 +1255,108 @@ objFunction <- function(currentPars,
     calcDeriv = calcDeriv
   )$residuals
 
-  ## Retrieve residuals of model, errormodel and constraint as well as
-  ## the derivatives.
   residuals <- calculatedResiduals[1:noData]
   variances <- calculatedResiduals[seq((noData + 1), (2 * noData))]
   constraint <- calculatedResiduals[2 * noData + 1]
   residualDeriv <- attr(calculatedResiduals, "residualDeriv")
   varianceDeriv <- attr(calculatedResiduals, "varianceDeriv")
 
-  ## Set bessel correction factor to 1
   bessel <- 1
-
-  ## Calculate the current value
-  value <- sum(residuals^2) + bessel * sum(log(pi * variances)) + constraint^2
+  isT <- identical(passParList$likelihood, "t")
+  if (isT) {
+    nu <- passParList$df
+    tConst <- log(nu * pi) - 2 * (lgamma((nu + 1) / 2) - lgamma(nu / 2))
+    tWeight <- (nu + 1) / (nu + residuals^2)
+    value <- (nu + 1) * sum(log1p(residuals^2 / nu)) + sum(log(variances)) +
+      noData * tConst + constraint^2
+  } else {
+    value <- sum(residuals^2) + bessel * sum(log(pi * variances)) + constraint^2
+  }
   gradient <- NULL
   hessian <- NULL
   constrVec <- NULL
   sparseHessian <- isTRUE(passParList$sparseHessian)
 
-  ## Derivatives via the sparse parameter-index structure (see buildMaskIndex):
-  ## every data point activates exactly one parameter per model symbol, so the
-  ## gradient is a set of segment sums and the Gauss-Newton Hessian a sparse
-  ## crossproduct, never a dense (2*noData) x nPars Jacobian. Cost
-  ## O(noData * nSymbols).
+  ## Derivatives assemble from the per-symbol index vectors of buildMaskIndex(),
+  ## without a dense Jacobian
   if (calcDeriv) {
     maskIdx <- passParList2$maskIdx
     if (is.null(maskIdx)) {
-      ## Rebuild the index structure from the levels when not supplied.
       maskIdx <- buildMaskIndex(parameters, levelsList, dataFit)
     }
 
-    nPars <- length(currentPars)
+    nPars <- maskIdx$nPars
     S <- length(parameters)
     gidx <- maskIdx$gidx
+    freeIdx <- passParList2$freeIdx
+    fullPars <- currentPars
+    if (!is.null(freeIdx)) {
+      fullPars <- numeric(nPars)
+      fullPars[freeIdx] <- currentPars
+      fullPars[-freeIdx] <- passParList2$fixedPars
+    }
 
-    ## --- Gradient: segment sums per symbol --------------------------------
-    ## Per data point i the contribution to its active parameter of symbol k is
-    ##   2 * residual_i * dResidual_i  +  (1/variance_i) * dVariance_i
-    ## (the residual term and the log-variance term from the original
-    ## `2 * residuals %*% residualJacobian + (1/variances) %*% jacVars`).
+    ## Gradient: per symbol, segment sums over the data points of each level
     gradient <- numeric(nPars)
     for (k in seq_len(S)) {
-      contrib <- 2 * residuals * residualDeriv[[k]] +
+      rTerm <- if (isT) tWeight * residuals else residuals
+      contrib <- 2 * rTerm * residualDeriv[[k]] +
         (bessel / variances) * varianceDeriv[[k]]
       acc <- rowsum(contrib, gidx[[k]], reorder = FALSE)
       idx <- as.integer(rownames(acc))
       gradient[idx] <- gradient[idx] + acc[, 1L]
     }
 
-    ## --- Constraint gradient: first biological symbol only ----------------
+    ## The constraint acts on the first biological symbol only
     cj <- numeric(nPars)
     ci <- maskIdx$constrIdx
     if (length(ci)) {
       cjVal <- constStrength / maskIdx$constrDenom
-      if (fitLogscale == TRUE) cjVal <- cjVal * exp(currentPars[ci])
+      if (fitLogscale == TRUE) cjVal <- cjVal * exp(fullPars[ci])
       cj[ci] <- cjVal
       gradient <- gradient + 2 * constraint * cj
     }
 
-    ## --- Hessian: 2 * ( t(Rj) Rj + outer(constraintRow) ) -----------------
-    ## Rj (noData x nPars) has exactly S non-zeros per row, at the active
-    ## parameter of each symbol; assemble it sparsely and take the crossproduct.
+    ## t: IRLS weights while fitting, expected information for uncertainties
+    jacEntries <- residualDeriv[seq_len(S)]
+    if (isT) {
+      hessWeight <- if (isTRUE(passParList2$expectedInfo)) {
+        (nu + 1) / (nu + 3)
+      } else {
+        tWeight
+      }
+      jacEntries <- lapply(jacEntries, function(d) sqrt(hessWeight) * d)
+    }
     residualJacobian <- Matrix::sparseMatrix(
       i = rep.int(seq_len(noData), S),
       j = unlist(gidx, use.names = FALSE),
-      x = unlist(residualDeriv[seq_len(S)], use.names = FALSE),
+      x = unlist(jacEntries, use.names = FALSE),
       dims = c(noData, nPars)
     )
     gnHessian <- 2 * Matrix::crossprod(residualJacobian)
 
     if (sparseHessian) {
-      ## Keep the Gauss-Newton Hessian sparse and return the rank-1 constraint
-      ## coupling separately. Full Hessian = gnHessian + 2 * tcrossprod(constrVec).
+      ## Full Hessian is gnHessian + 2 * tcrossprod(constrVec)
       hessian <- gnHessian
       constrVec <- cj
     } else {
-      ## Dense Hessian for the C++ trust kernel; add the rank-1 constraint only
-      ## on the biological sub-block to avoid a dense nPars x nPars outer product.
+      ## The rank-1 constraint term is non-zero on the constrained block only
       hessian <- as.matrix(gnHessian)
       if (length(ci)) {
         hessian[ci, ci] <- hessian[ci, ci] + 2 * outer(cj[ci], cj[ci])
       }
     }
+    if (!is.null(freeIdx)) {
+      gradient <- gradient[freeIdx]
+      hessian <- hessian[freeIdx, freeIdx, drop = FALSE]
+      if (!is.null(constrVec)) constrVec <- constrVec[freeIdx]
+    }
   }
 
-  ## Takes residual (ultimative res <- prediction - value and res / sqrt(var)
-  ## from rssModel()) to retrive the presdiction
   prediction <- residuals * sqrt(variances) + dataFit$value
-
-  ## Calculate errors
   sigma <- sqrt(variances)
 
-  ## Guard against non-finite objective/derivatives at extreme trial points.
-  ## On log-scale parameters trust() probes points where exp() (in the model
-  ## or the error model) overflows to Inf, yielding Inf/NaN value, gradient or
-  ## hessian. trust::check.objfun.output() aborts the whole fit on an NA/NaN
-  ## value, but tolerates a (+Inf) value in minimization - in that case it
-  ## simply rejects the step and shrinks the trust region. Reporting Inf here
-  ## therefore lets the optimizer back off from the overflow region instead of
-  ## crashing on a single bad probe.
+  ## Non-finite results become value = Inf, which trust() rejects as a step
   hessianFinite <- if (is.null(hessian)) {
     TRUE
   } else if (sparseHessian) {
@@ -1738,8 +1372,6 @@ objFunction <- function(currentPars,
     constrVec <- NULL
   }
 
-  ## Compose all of the above to one list. constrVec is non-NULL only in the
-  ## sparse-Hessian path, where it carries the rank-1 normalization coupling.
   list(
     value = value, gradient = gradient, hessian = hessian,
     constrVec = constrVec, prediction = prediction, sigma = sigma
@@ -1749,56 +1381,25 @@ objFunction <- function(currentPars,
 
 # evaluateModel() --------------------------------------------------------
 
-#' Model evaluation method
+#' Model prediction minus data for given biological parameter values
 #'
-#' Method to evaluate the model with a given set of parameters.
+#' @param initPars values of the first biological symbol, one per data point.
+#' @param parList named list with one vector per model symbol, named by level.
+#' @param passParList,passParList2 settings, see `scaleTarget()`.
 #'
-#' @param initPars Parameters used for model evaluation
-#'
-#' @param parList Named list with one entry per effect (with the respective
-#' name). The entry contains a named vector with the unique stings of the
-#' respective effect values i.e. the entries of the respective columns (e.g.
-#' name, time, condition etc. for 'biological')
-#' @param passParList from the the \code{passParList} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{effectsPars}}{
-#'      Named list with one entry per effect. The values are the respective
-#'      effect parameters.
-#'  }
-#'  \item{\code{modelExpr}}{
-#'      The argument of the \code{model} parameter of \link{alignReplicates} parsed as
-#'      an executable expression.
-#'  }
-#' }
-#'
-#' @param passParList2 from the the \code{passParList2} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{dataFit}}{The current dataset.}
-#' }
-#'
+#' @return numeric vector, one entry per data point.
 #'
 #' @noRd
-
 evaluateModel <- function(initPars,
                           parList,
                           passParList,
                           passParList2) {
-  ## Create a list with with values from 1 to the number of parameters
-
   effectsPars <- passParList$effectsPars
   modelExpr <- passParList$modelExpr
   dataFit <- passParList2$dataFit
 
-
-
-
+  ## The biological class index is the data point, so entry i applies to point i
   biological <- seq_along(initPars)
-
-  ## Generate a list with the entries:
-  ##   parameters, the sequence saved generated as "fixed", name, time,
-  ##   value, sigma, fixed, latent, error, ys, sj, sigmaR
   useList <- c(
     list(initPars, biological = biological),
     as.list(dataFit),
@@ -1812,50 +1413,22 @@ evaluateModel <- function(initPars,
 }
 
 
-
 # evaluateModelJacobian() -----------------------------------------------
 
-#' Model jacobian evaluation method
+#' Derivative of the model with respect to the first biological symbol
 #'
-#' Method to evaluate the model jacobian with a given set of parameters.
+#' @inheritParams evaluateModel
 #'
-#' @param initPars Parameters used for model jacobian evaluation
-#'
-#' @param parList Named list with one entry per effect (with the respective
-#' name). The entry contains a named vector with the unique stings of the
-#' respective effect values i.e. the entries of the respective columns (e.g.
-#' name, time, condition etc. for 'biological')
-#' @param passParList from the the \code{passParList} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{effectsPars}}{
-#'      Named list with one entry per effect. The values are the respective
-#'      effect parameters.
-#'  }
-#'  \item{\code{modelDerivExpr}}{
-#'      The jacobian of the argument of the \code{model} parameter of
-#'      \link{alignReplicates} parsed as an executable expression.
-#'  }
-#' }
-#'
-#' @param passParList2 from the the \code{passParList2} argument
-#' the following parameters are used:
-#' \describe{
-#'  \item{\code{dataFit}}{The current dataset.}
-#' }
+#' @return numeric vector, one entry per data point.
 #'
 #' @noRd
-#'
-
 evaluateModelJacobian <- function(initPars,
                                   parList,
                                   passParList,
                                   passParList2) {
   effectsPars <- passParList$effectsPars
   modelDerivExpr <- passParList$modelDerivExpr
-
   dataFit <- passParList2$dataFit
-
 
   biological <- seq_along(initPars)
   useList <- c(
@@ -1869,18 +1442,13 @@ evaluateModelJacobian <- function(initPars,
 }
 
 
-
 # getMaxY() --------------------------------------------------------------
 
-#' Determine the maximal y values for plots
+#' Rounded upper y limit for plot axes
 #'
-#' A method producing a list of y values that will result in a eye pleasing
-#' set of y tics when used in ggplot. Part of \link{plotIt}
+#' @param x numeric scalar, the largest y value.
 #'
-#' @param x numerical vector containing the y data which will be used to
-#' determine the set of y max
-#'
-#' @return numerical vector with the maximal y values.
+#' @return numeric scalar \eqn{\ge x}.
 #'
 #' @noRd
 getMaxY <- function(x) {
@@ -1891,48 +1459,32 @@ getMaxY <- function(x) {
   uppDiff <- upper - rx
 
   if (x > 5) {
-    if (upper %% 2 == 0) {
-      out <- upper
-    } else {
-      out <- lower + 1
-    }
-  } else {
-    if (x < 2) {
-      if (rx > x) {
-        if (rx %% 0.2 == 0) {
-          out <- rx
-        } else {
-          out <- rx + 0.1
-        }
-      } else {
-        if (rx %% 0.2 != 0) {
-          out <- rx + 0.1
-        } else {
-          out <- rx + 0.2
-        }
-      }
-    } else {
-      if (lowDiff < uppDiff) {
-        out <- lower + 0.5
-      } else {
-        out <- upper
-      }
-    }
+    return(if (upper %% 2 == 0) upper else lower + 1)
   }
-
-  return(out)
+  if (x >= 2) {
+    return(if (lowDiff < uppDiff) lower + 0.5 else upper)
+  }
+  if (rx > x) {
+    return(if (rx %% 0.2 == 0) rx else rx + 0.1)
+  }
+  if (rx %% 0.2 != 0) {
+    return(rx + 0.1)
+  }
+  rx + 0.2
 }
 
 
 # scaleValues() ----------------------------------------------------------
 
-#' scale the values according to the current parameter scale
+#' Transform values and sigma from the fit scale to the linear scale
 #'
-#' @param fitLogscale the current scale
-#' @param value value to be scaled
-#' @param upper upper error bound, i.e. value + sigma
-#' @param lower lower error bound, i.e. value - sigma
-#' @param sigma sigma to be scaled
+#' @param fitLogscale logical; if `TRUE`, values are exponentiated and sigma is
+#'   propagated linearly.
+#' @param outputScale unused.
+#' @param value,sigma numeric vectors on the fit scale.
+#' @param upper,lower unused, recomputed as `value +- sigma`.
+#'
+#' @return list with `value`, `upper`, `lower` and `sigma`.
 #'
 #' @noRd
 scaleValues <- function(fitLogscale,
@@ -1943,38 +1495,24 @@ scaleValues <- function(fitLogscale,
                         sigma) {
   if (fitLogscale == TRUE) {
     value <- exp(value)
-    upper <- exp(upper)
-    lower <- exp(lower)
     sigma <- value * sigma
-  } else {
-    value <- value
-    upper <- upper
-    lower <- lower
-    sigma <- sigma
   }
-
   upper <- value + sigma
   lower <- value - sigma
-
-
-
-
 
   return(list(value = value, upper = upper, lower = lower, sigma = sigma))
 }
 
 
-
 # getParClass() -------------------------------------------------------
 
-#' get parameter class from from individualized name
+#' Model symbol of indexed parameter names
 #'
-#' @param paramlist list of parameters with names of form 'p_i' with parameter class p and
-#' index i. e.g. 'yi_1'
+#' @param paramlist named vector with names of the form `<symbol>_<index>`.
 #'
-#' @return vector with classes e.g. yi
+#' @return character vector of symbols.
 #'
 #' @noRd
 getParClass <- function(paramlist) {
-  classes <- gsub('[_0-9]+', '', names(paramlist))
+  sub("_[0-9]+$", "", names(paramlist))
 }

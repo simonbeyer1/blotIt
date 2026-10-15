@@ -1,168 +1,90 @@
-#
-#' Align time-course data based on an Mixed-Effects alignment model
+#' Align replicate data on a common scale
 #'
-#' The function deals primarily with time-course data of different
-#' targets which have been measured under different experimental
-#' conditions and whose measured values might be on a different
-#' scale, e.g. because of different amplification. The algorithm
-#' determines the different scaling and estimates the time-course on
-#' a common scale.
+#' Fits an alignment model with biological, scaling and error parameters per
+#' target by maximum likelihood and returns the aligned values with their
+#' uncertainties. See `vignette("blotIt")` for the method.
 #'
-#'
-#' @param data data.frame containing the the data to be scaled. Usualy the
-#' output of \link{readWide} is used. Obligatory are the columns \code{name},
-#' and \code{value}. In the case of time dependet data, a \code{time} column is
-#' also necessary. Additionally, \code{data} should have further columns,
-#' e.g. characterizing experimental conditions (the fixed effects) and
-#' sources of variance between data of the same experimental condition
-#' (the scaled variables).
-#'
-#' @param model character defining the model by which the values in
-#' \code{data} can be described, e.g. "yi/sj"
-#'
-#' @param errorModel character defining a model for the standard
-#' deviation of a value, e.g. "sigma0 + value * sigmaR". This model
-#' can contain parameters, e.g. "sigma0" and "sigmaR", or numeric
-#' variables from \code{data}, e.g. "value" or "time".
-#'
-#' @param biological two-sided formula of the form
-#' \code{par1+par2+... ~ name1+name2+...} where "par1, par2, ..." are
-#' parameters contained in \code{model}, e.g. "yi", and "name1, ..."
-#' refers to variables in \code{data}, e.g. "condition".
-#' The parameters "par1, ..." are determined specific to the levels of
-#' "name1, ...".
-#'
-#' @param scaling two-sided formula of the form
-#' \code{par1+par2+... ~ name1+name2+...} where "par1, par2, ..." are
-#' parameters contained in \code{model}, e.g. "sj", and "name1, ..."
-#' refers to variables in \code{data}, e.g. "Experiment".
-#' @param error two-sided formula of the form
-#' \code{par1+par2+... ~ name1+name2+...} where "par1, par2, ..." are
-#' parameter contained in \code{error}, e.g. "sigma0" and "sigmaR", and
-#' "name1, ..." refers to variables in \code{data}. If the same values
-#' of "par1, ..." should be assumed for all data, the right hand side of ~ has
-#' to reffer to the "name" column of \code{data}.
-#' @param fitLogscale logical, defining if the parameters are
-#' fitted on a log scale. Computational reasons.
-#' @param normalize logical indicating whether the biological effect
-#' parameter should be normalized to unit mean.
-#'
-#' @param averageTechRep logical, indicates if the technical replicates
-#' should be averaged
-#'
-#' @param namesFactored logical, indicates if the \code{name} columns of the
-#' output should be parsed as factors instead of characters.
-#'
-#' @param verbose logical, print out information about each fit
-#' @param normalizeInput logical, if TRUE the input will be normalized before
-#' scaling, helpful if convergence fails because the data varies for to many
-#' orders of magnitude.
-#' @param keepOriginalScale character, if "none" the output will have another mean as the input, use "log" to keep same offset of log-data and "lin" to keep same mean for linear data
-#' @param iterlim numerical, shorthand for
-#'   \code{optControls = list(iterlim = ...)}.  Kept for backward
-#'   compatibility; if \code{optControls$iterlim} is also set it takes
+#' @param data data frame in long format, usually the output of [readWide()].
+#'   Required columns are `name` and `value`, plus the columns named in
+#'   `biological`, `scaling` and `error`.
+#' @param model character, the alignment model, e.g. `"yi / sj"`.
+#' @param errorModel character, model of the standard deviation, e.g.
+#'   `"sigma0 + value * sigmaR"`. It may use parameters, data columns and
+#'   `value`, which stands for the model prediction.
+#' @param biological two-sided formula `par1 + par2 ~ col1 + col2` assigning
+#'   the biological parameters of `model` one value per level of the data
+#'   columns on the right-hand side.
+#' @param scaling two-sided formula as `biological` for the scaling parameters.
+#' @param error two-sided formula as `biological` for the error parameters, or
+#'   a list of such formulas to give each error parameter its own levels, e.g.
+#'   `list(sigmaA ~ name + modality, sigmaB ~ name)`. Use `~ name` for one value
+#'   per target.
+#' @param fitLogscale logical, fit the logarithm of the parameters.
+#' @param normalize logical, constrain the mean of the first biological
+#'   parameter to 1.
+#' @param averageTechRep logical, average data points that share all
+#'   biological and scaling levels.
+#' @param verbose logical, print information about each fit.
+#' @param namesFactored logical, return `name` columns as factors.
+#' @param normalizeInput logical, normalize the data of each target before the
+#'   fit: positive data are divided by their mean, other data are centered.
+#' @param keepOriginalScale character, `"none"` (default), `"lin"` to rescale
+#'   outputs to the mean of the input, or `"log"` to shift them to it.
+#' @param outputScale character, scale of the returned aligned values:
+#'   `"linear"` (default) or a transformation understood by [plotIt()].
+#' @param iterlim integer, iteration limit. `optControls$iterlim` takes
 #'   precedence.
+#' @param optControls named list of optimizer settings: `rinit` (default 0.1),
+#'   `rmax` (10), `parscale` (`FALSE`), `iterlim` (100), `fterm` and `mterm`
+#'   (both `sqrt(.Machine$double.eps)`), see [trust()], and
+#'   `structuredThreshold` (5000), the parameter count above which the sparse
+#'   optimizer is used.
+#' @param multistart integer, number of fits per target. Start 1 is the initial
+#'   point, the others perturb it randomly. A converged start replaces start 1
+#'   if its objective value is lower.
+#' @param rootControls list of arguments passed to [nleqslv::nleqslv()] when
+#'   the model has no analytic inverse, e.g. `method`, `global`, `control`.
+#' @param parinit `NULL` (all parameters start at 1) or a named list of start
+#'   values on the scale of the parameter table. Each entry is a number for all
+#'   levels or a vector named by level (as in the `level` column of the
+#'   parameter table). Parameters and levels not given start at 1.
+#' @param multistartSd standard deviation of the normal perturbations of the
+#'   start values (on the fit scale) for starts 2 to `multistart`.
+#' @param cores integer, number of processes for the multistart fits. Values
+#'   \eqn{> 1} fork processes and are not available on Windows. Results do not
+#'   depend on `cores`.
+#' @param likelihood `"normal"` (default) or `"t"`. With `"t"`, each data point
+#'   follows a Student-t distribution with location `model` and scale
+#'   `errorModel`, which reduces the influence of outliers. The `sigma` of
+#'   `prediction` and `scaled` is then this scale.
+#' @param df degrees of freedom of the t distribution (fixed), used only for
+#'   `likelihood = "t"`.
 #'
-#' @param optControls named list of control parameters passed to
-#'   \code{\link[trust]{trust}}.  Supported entries (with defaults):
+#' @return list with
 #' \describe{
-#'   \item{\code{rinit}}{Initial trust region radius (default \code{0.1}).}
-#'   \item{\code{rmax}}{Maximum trust region radius (default \code{10}).}
-#'   \item{\code{parscale}}{Logical or numeric vector for parameter
-#'     rescaling.  \code{FALSE} (default) disables rescaling; a numeric
-#'     vector is passed directly to \code{trust}.}
-#'   \item{\code{iterlim}}{Iteration limit (default \code{100}).}
-#'   \item{\code{fterm}}{Convergence tolerance for objective value change
-#'     (default \code{sqrt(.Machine$double.eps)}).}
-#'   \item{\code{mterm}}{Convergence tolerance for step size
-#'     (default \code{sqrt(.Machine$double.eps)}).}
-#'   \item{\code{structuredThreshold}}{Parameter count above which a target is
-#'     fit with the sparse, structure-exploiting optimizer instead of the dense
-#'     kernel (default \code{5000}). The sparse path avoids the dense
-#'     \eqn{nPars \times nPars} Hessian and makes fits with up to
-#'     \eqn{\sim 10^6} parameters (dense time-course alignment) feasible.}
-#' }
-#' Any entries not supplied use the defaults above.
-#'
-#' @param multistart integer, number of optimization starts.
-#'   \code{multistart = 1} (the default) runs a single fit from the
-#'   default initial values.  Values \eqn{> 1} run additional fits
-#'   from randomly perturbed starting points; the result with the
-#'   lowest objective value is kept.
-#'
-#' @param rootControls list of control parameters for the model inversion
-#' step (scaling to common scale). The inversion is primarily solved
-#' elementwise per data point using \code{\link[stats]{uniroot}} (Brent's
-#' method). If any points fail, \code{\link[nleqslv]{nleqslv}} is used as
-#' fallback. Supported entries:
-#' \code{searchInterval} (numeric vector of length 2, default
-#' \code{c(-100, 100)}) defining the initial bracket for each 1D problem.
-#' For the \code{nleqslv} fallback: \code{method} (\code{"Newton"} or
-#' \code{"Broyden"}), \code{global} (globalization strategy), and
-#' \code{control} (a list with e.g. \code{allowSingular}, \code{xtol},
-#' \code{ftol}, \code{maxit}).
-#'
-#' @param outputScale character, scale on which the aligned values are returned
-#' and plotted. "linear" (default) leaves them unchanged; other values name a
-#' transformation (e.g. "log") understood by \code{\link{plotIt}}.
-#'
-#' @details Alignment of time-course data is achieved by an alignment
-#' model which explains the observed data by a function mixing
-#' fixed effects, usually parameters reflecting the "underlying"
-#' time-course, and latent variables, e.g. scaling parameters taking
-#' account for effects like different amplification or loading, etc.
-#' Depending on the measurement technique, the data has constant
-#' relative error, or constant absolute error or even a combination
-#' of those. This error is described by an error function. The error
-#' parameters are usually global, i.e. the same parameter values are
-#' assumed for all data points.
-#'
-#' @return Object of class \code{aligned}, i.e. a data frame of the
-#' alignment result containing an attribute "outputs":
-#'  a list of data frames
-#' \describe{
-#' \item{aligned}{data.frame with the original column names plus the column
-#'     \code{sigma}. Each set of unique biological effects i.e. biological
-#'     different condition (e.g. time point, target and treatment) has one set
-#'     of \code{value} and \code{sigma}. The values are the estimated true
-#'     values i.e. the determined biological parameters. The errors in the
-#'     \code{sigma} column are estimated by employing the fisher information
-#'     to quantify the uncertainty of the respective fit. Both, the value and
-#'     its error are on the common scale.}
-#' \item{scaled}{The original measurements scaled to common scale by applying
-#'     inverse model. The errors are the result of the evaluation of the error
-#'     model and then also scaled to common scale by use of Gaussian error
-#'     propagation.}
-#' \item{prediction}{Original data with \code{value} replaced by the prediction
-#'     (evaluation of the model with the fitted parameters), and \code{sigma}
-#'     from the evaluation of the error model. Both are on the original scale.
-#'     }
-#'
-#' \item{original}{The original data as passed as  \code{data}.}
-#' \item{originalWithParameters}{The original data but with added columns
-#'     containing the estimated parameters}
-#'
-#' \item{parameter}{Parameter table with the columns: \code{name}: the name of
-#'     the current target, \code{level}: the pasted unique set of effects
-#'     (biological, scaling or error), \code{parameter}: the parameter
-#'     identifier as defined in the (error) model, \code{value} and \code{sigma}
-#'     containing the determined values and corresponding errors, \code{nll}:
-#'     twice the negative log-likelihood of the fit, \code{noPars} and
-#'     \code{noData} containing the number of parameters and data points for
-#'     the respected fit. This list entry also has two attributes: \code{value}
-#'     containing the final value (residual sum of squares) passed to
-#'     \code{\link{trust}} by the objective function and \code{df} the degrees
-#'     of freedom of the fitting process.}
-#'
-#' \item{biological}{Names of the columns containing the biological effects}
-#' \item{scaling}{Names of the columns containing the scaling effects}
-#' \item{error}{Names of the columns containing the error effects}
+#' \item{aligned}{one row per biological level with the estimated `value`,
+#'     its `sigma` from the Fisher information, `lower` and `upper`, on the
+#'     common scale.}
+#' \item{scaled}{the measurements mapped to the common scale by the inverse
+#'     model, with propagated errors.}
+#' \item{prediction}{the data with `value` replaced by the model prediction
+#'     and `sigma` by the error model, on the original scale.}
+#' \item{original}{the data that were fitted.}
+#' \item{originalWithParameters}{the data with one column per fitted
+#'     parameter.}
+#' \item{parameter}{parameter table with columns `name`, `level`,
+#'     `parameter`, `value`, `sigma`, `nll` (\eqn{-2 \log L}), `noPars`,
+#'     `noData`, `lower`, `upper`, and attributes `value` (total
+#'     \eqn{-2 \log L}) and `df` (degrees of freedom). Parameters without
+#'     influence on the likelihood are not fitted and reported as `NA`.}
+#' \item{multistart}{final objective value, convergence and iterations of each
+#'     start per target, see [plotWaterfall()].}
+#' \item{biological, scaling, error}{names of the data columns of each effect.}
+#' \item{outputScale}{the `outputScale` argument.}
 #' }
 #'
-#' The estimated parameters are returned by the attribute "parameters".
 #' @example inst/examples/exampleAlignReplicates.R
-#' @seealso \link{readWide} to read data in a wide column format and
-#' get it in the right format for \code{alignReplicates}.
+#' @seealso [readWide()], [plotIt()], [llrTest()]
 #'
 #' @importFrom stats D
 #'
@@ -184,20 +106,21 @@ alignReplicates <- function(data,
                             iterlim = 100,
                             optControls = list(),
                             multistart = 1,
-                            rootControls = list()
+                            rootControls = list(),
+                            parinit = NULL,
+                            multistartSd = 3,
+                            cores = 1,
+                            likelihood = c("normal", "t"),
+                            df = 5
 ) {
 
-  ## Pin BLAS to one thread for the fit, restored on exit. Multithreaded MKL can
-  ## return wrong eigen/svd results here, and single thread is faster for these
-  ## small matrices anyway. No-op without OpenMP or for OpenBLAS-pthread.
+  ## BLAS runs single-threaded during the fit, restored on exit
   prevBlasThreads <- setBlasThreads(1L)
   if (!is.na(prevBlasThreads)) {
     on.exit(setBlasThreads(prevBlasThreads), add = TRUE)
   }
 
-  ## ---- Build optControls with defaults -----------------------------------
-  ## Merge user-supplied optControls with defaults.
-  ## iterlim kept as standalone arg for backward compat; optControls wins.
+  ## optControls$iterlim takes precedence over the iterlim argument
   optDefaults <- list(
     rinit    = 0.1,
     rmax     = 10,
@@ -208,10 +131,26 @@ alignReplicates <- function(data,
   )
   optControls <- modifyList(optDefaults, optControls)
 
-  ## ---- Validate multistart -----------------------------------------------
   multistart <- as.integer(max(multistart, 1L))
+  likelihood <- match.arg(likelihood)
+  if (!is.numeric(df) || length(df) != 1L || !is.finite(df) || df <= 0) {
+    stop("'df' must be a positive number.")
+  }
+  cores <- as.integer(max(cores, 1L))
+  if (cores > 1L && .Platform$OS.type == "windows") {
+    warning("cores > 1 is not supported on Windows, using cores = 1.")
+    cores <- 1L
+  }
 
-  ## check input for mistakes
+  ## A previous result is refitted from its data, starting at its estimates
+  parameterData <- NULL
+  if (is.list(data) && !is.data.frame(data) &&
+      all(c("original", "parameter") %in% names(data))) {
+    parameterData <- data$parameter
+    data <- as.data.frame(data$original)
+    data$sigma <- NULL
+  }
+
   inputCheckReport <- inputCheck(
     data = data,
     model = model,
@@ -227,15 +166,6 @@ alignReplicates <- function(data,
     cat(inputCheckReport, "\n")
   }
 
-  ## Check if data is already blotIt output
-  parameterData <- NULL
-
-  if (inherits(data, "aligned")) {
-    parameterData <- data$parameters
-    data <- data$original
-  }
-
-  ## read biological, scaling and error effects from input
   effects <- identifyEffects(
     biological = biological,
     scaling = scaling,
@@ -244,8 +174,8 @@ alignReplicates <- function(data,
 
   effectsValues <- effects$effectsValues
   effectsPars <- effects$effectsPars
+  errorGroups <- effects$errorGroups
 
-  ## prepare data
   data <- as.data.frame(data)
 
   toBeScaled <- splitForScaling(
@@ -254,32 +184,27 @@ alignReplicates <- function(data,
     normalizeInput
   )
 
-  ## Generate unique list of targets
+  ## Target names are made unique if a target splits into several scaling blocks
   targets <- make.unique(
     vapply(toBeScaled, function(d) as.character(d$name)[1], ""),
     sep = "_"
   )
 
-  ## Rename names to unique if multiple scalings per target exist
   for (n in seq_along(targets)) {
     toBeScaled[[n]]$name <- targets[n]
   }
 
-  ## Get biological, scaling and error parameter from model and error model
   parameters <- getSymbols(c(model, errorModel), exclude = colnames(data))
 
-  ## Include the normalization term as a constraint if said so in the function
-  ## call
   if (normalize) {
-    constraint <- paste("1e3 * (mean(", effectsPars[1][1], ") - 1)")
+    constraint <- paste("1e3 * (mean(", effectsPars[[1]][1], ") - 1)")
     constStrength <- 1000
   } else {
     constraint <- "0"
     constStrength <- 0
   }
 
-  ## Retrieve the covariates as the "remaining" model parameters, when fixed,
-  ## latent and errorparameters are excluded
+  ## Covariates are data columns used in the (error) model
   covariates <- union(
     getSymbols(
       model,
@@ -292,7 +217,6 @@ alignReplicates <- function(data,
   )
   cat("Covariates:", paste(covariates, sep = ", "), "\n")
 
-  ## Check if parameters from (error-) model and passed expressions coincide
   if (
     length(
       setdiff(
@@ -309,15 +233,32 @@ alignReplicates <- function(data,
          'scaling', 'biological' or 'error'")
   }
 
-  ## Name the respective parameters fixed, latent and error
+  ## Names are effect classes; they index the parameter vectors in the model
   names(parameters)[parameters %in% effectsPars[[1]]] <- "biological"
   names(parameters)[parameters %in% effectsPars[[2]]] <- "scaling"
   names(parameters)[parameters %in% effectsPars[[3]]] <- "error"
+  for (p in names(errorGroups)) {
+    names(parameters)[parameters == p] <- paste0("error_", p)
+  }
 
-  ## --- Attempt symbolic (analytical) inversion via SymPy -----------------
-  ## This is done BEFORE log-scale and bracket substitutions so that
+  if (!is.null(parinit)) {
+    if (!is.list(parinit) || is.null(names(parinit)) ||
+        !all(names(parinit) %in% parameters)) {
+      stop("'parinit' must be a list named by model parameters (",
+           paste(parameters, collapse = ", "), ").")
+    }
+    for (p in names(parinit)) {
+      v <- parinit[[p]]
+      if (!is.numeric(v) || anyNA(v) || (length(v) != 1L && is.null(names(v)))) {
+        stop("parinit$", p, " must be a number or a numeric vector named by level.")
+      }
+      if (fitLogscale && any(v <= 0)) {
+        stop("parinit$", p, " must be positive with fitLogscale = TRUE.")
+      }
+    }
+  }
 
-  ## symbolicInverse() works on the clean, user-supplied model string.
+  ## Must run on the model before the substitutions below
   symbolicResult <- symbolicInverse(
     model = model,
     bioPar = effectsPars[[1]][1],
@@ -325,18 +266,13 @@ alignReplicates <- function(data,
     verbose = verbose
   )
 
-  ## Apply the same transformations (logscale, brackets) as the forward model,
-  ## done below after those transforms are defined. Store the raw result and
-  ## process it afterwards.
-
-  ## parse error model by replacing the "value" by the model
+  ## `value` in the error model is the model prediction
   errorModel <- replaceSymbols(
     "value",
     paste0("(", model, ")"),
     errorModel
   )
 
-  ## Apply transformation according to given 'fitLogscale' parameter
   if (fitLogscale == TRUE) {
     model <- replaceSymbols(parameters, paste0(
       "exp(", parameters,
@@ -357,13 +293,10 @@ alignReplicates <- function(data,
     cat("model, errormodel and constraint remain linear scaled.\n")
   }
 
-
-  ## Calculating the derivative
   modelDeriv <- deparse(
     stats::D(parse(text = model), name = effectsPars[[1]][1])
   )
 
-  ## Calculating the (error) model jacobian
   modelJacobian <- lapply(
     parameters,
     function(p) {
@@ -377,11 +310,9 @@ alignReplicates <- function(data,
     }
   )
 
-  ## Construct math function expressions
   constrExpr <- parse(text = constraint)
 
-  ## Replace the parameters used in the (error) model and the derivatives
-  ## by placeholders of the respective effect category
+  ## p -> p[<effect class>]
   for (n in seq_along(parameters)) {
     model <- replaceSymbols(parameters[n], paste0(
       parameters[n],
@@ -418,7 +349,6 @@ alignReplicates <- function(data,
   cat("Model:        ", model, "\n", sep = "")
   cat("Error Model:  ", errorModel, "\n", sep = "")
 
-  ## Parse functions to an executable expression
   modelExpr <- parse(text = model)
   modelDerivExpr <- parse(text = modelDeriv)
   errorModelExpr <- parse(text = errorModel)
@@ -432,10 +362,6 @@ alignReplicates <- function(data,
     function(myjac) parse(text = myjac)
   )
 
-  ## --- Prepare the analytical inverse expressions ------------------------
-  ## Apply the same logscale + bracket transforms that were applied to
-
-  ## the forward model above.
   analyticInverse <- prepareAnalyticInverse(
     symbolicResult = symbolicResult,
     parameters = parameters,
@@ -469,101 +395,31 @@ alignReplicates <- function(data,
     outputScale = outputScale,
     optControls = optControls,
     multistart = multistart,
+    multistartSd = multistartSd,
+    likelihood = likelihood,
+    df = df,
+    cores = cores,
+    parinit = parinit,
+    errorGroups = errorGroups,
     rootControls = rootControls,
     analyticInverseExpr = if (!is.null(analyticInverse)) analyticInverse$inverseExpr else NULL,
     analyticInverseDerivExpr = if (!is.null(analyticInverse)) analyticInverse$inverseDerivExpr else NULL
   )
 
-  # * Hand over to scaling --------------------------------------------------
-  out <- lapply(
-    seq_along(toBeScaled),
-    function(i,
-             passParList) {
-      try({
-        cat(
-          "Target ", i, "/", length(toBeScaled), ":",
-          targets[i], "\n", sep = ""
-        )
-        out <- scaleTarget(
-          currentData = toBeScaled[[i]],
-          passParList = passParList
-        )
+  out <- lapply(seq_along(toBeScaled), function(i) {
+    try({
+      cat("Target ", i, "/", length(toBeScaled), ":", targets[i], "\n", sep = "")
+      scaleTarget(currentData = toBeScaled[[i]], passParList = passParList)
+    }, silent = FALSE)
+  })
 
-        return(out)
-      },
-      silent = FALSE
-      )
-    },
-    ## additional parameters for scaleTarget
-    passParList = passParList
-  )
+  ## Failed targets are dropped from all outputs
+  ok <- Filter(function(o) !inherits(o, "try-error"), out)
+  parTable <- do.call(rbind, lapply(ok, function(o) o[[6]]))
+  attr(parTable, "value") <- do.call(sum, lapply(ok, function(o) attr(o[[6]], "value")))
+  attr(parTable, "df") <- do.call(sum, lapply(ok, function(o) attr(o[[6]], "df")))
 
-  ## Sanitize results from failed fits
-  ## rbind parameter table from not-failed elements of out
-  parTable <- do.call(
-    rbind,
-    lapply(
-      out,
-      function(o) {
-        if (!inherits(o, "try-error")) {
-          o[[6]]
-        } else {
-          NULL
-        }
-      }
-    )
-  )
-
-  ## add up the "values", i.e. the -2*LL
-  attr(parTable, "value") <- do.call(
-    sum,
-    lapply(
-      out,
-      function(o) {
-        if (!inherits(o, "try-error")) {
-          attr(o[[6]], "value")
-        } else {
-          0
-        }
-      }
-    )
-  )
-
-  ## add up degrees of freedom
-  attr(parTable, "df") <- do.call(
-    sum,
-    lapply(
-      out,
-      function(o) {
-        if (!inherits(o, "try-error")) {
-          attr(o[[6]], "df")
-        } else {
-          0
-        }
-      }
-    )
-  )
-
-  ## paste together the other results
-  outCombined <- lapply(
-    seq_len(5),
-    function(i) {
-      do.call(
-        rbind,
-        lapply(
-          out,
-          function(o) {
-            if (!inherits(o, "try-error")) {
-              o[[i]]
-            } else {
-              NULL
-            }
-          }
-        )
-      )
-    }
-  )
-
+  outCombined <- lapply(seq_len(5), function(i) do.call(rbind, lapply(ok, function(o) o[[i]])))
   names(outCombined) <- c(
     "prediction",
     "scaled",
@@ -572,52 +428,25 @@ alignReplicates <- function(data,
     "originalWithParameters"
   )
 
-  if(keepOriginalScale!="none"){
-    if(normalizeInput) warning("To keep the original scale, use normalizeInput = FALSE")
-    if(keepOriginalScale=="lin"){
-      for(target in unique(outCombined$original$name)){
-        meanOriginal <- mean(subset(outCombined$original, name==target)$value)
-        meanScaled <- mean(subset(outCombined$scaled, name==target)$value)
-        meanAligned <- mean(subset(outCombined$aligned, name==target)$value)
-        meanPrediction <- mean(subset(outCombined$prediction, name==target)$value)
-
-        outCombined$scaled$value[which(outCombined$scaled$name==target)] <- outCombined$scaled$value[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-        outCombined$scaled$sigma[which(outCombined$scaled$name==target)] <- outCombined$scaled$sigma[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-        outCombined$scaled$lower[which(outCombined$scaled$name==target)] <- outCombined$scaled$lower[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-        outCombined$scaled$upper[which(outCombined$scaled$name==target)] <- outCombined$scaled$upper[which(outCombined$scaled$name==target)]*meanOriginal/meanScaled
-
-        outCombined$aligned$value[which(outCombined$aligned$name==target)] <- outCombined$aligned$value[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-        outCombined$aligned$sigma[which(outCombined$aligned$name==target)] <- outCombined$aligned$sigma[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-        outCombined$aligned$lower[which(outCombined$aligned$name==target)] <- outCombined$aligned$lower[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-        outCombined$aligned$upper[which(outCombined$aligned$name==target)] <- outCombined$aligned$upper[which(outCombined$aligned$name==target)]*meanOriginal/meanAligned
-
-        outCombined$prediction$value[which(outCombined$prediction$name==target)] <- outCombined$prediction$value[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-        outCombined$prediction$sigma[which(outCombined$prediction$name==target)] <- outCombined$prediction$sigma[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-        outCombined$prediction$lower[which(outCombined$prediction$name==target)] <- outCombined$prediction$lower[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-        outCombined$prediction$upper[which(outCombined$prediction$name==target)] <- outCombined$prediction$upper[which(outCombined$prediction$name==target)]*meanOriginal/meanPrediction
-      }
-    }
-    if(keepOriginalScale=="log"){
-      for(target in unique(outCombined$original$name)){
-        meanOriginal <- mean(subset(outCombined$original, name==target)$value)
-        meanScaled <- mean(subset(outCombined$scaled, name==target)$value)
-        meanAligned <- mean(subset(outCombined$aligned, name==target)$value)
-        meanPrediction <- mean(subset(outCombined$prediction, name==target)$value)
-
-        outCombined$scaled$value[which(outCombined$scaled$name==target)] <- outCombined$scaled$value[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-        #outCombined$scaled$sigma[which(outCombined$scaled$name==target)] <- outCombined$scaled$sigma[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-        outCombined$scaled$lower[which(outCombined$scaled$name==target)] <- outCombined$scaled$lower[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-        outCombined$scaled$upper[which(outCombined$scaled$name==target)] <- outCombined$scaled$upper[which(outCombined$scaled$name==target)]+meanOriginal-meanScaled
-
-        outCombined$aligned$value[which(outCombined$aligned$name==target)] <- outCombined$aligned$value[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-        #outCombined$aligned$sigma[which(outCombined$aligned$name==target)] <- outCombined$aligned$sigma[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-        outCombined$aligned$lower[which(outCombined$aligned$name==target)] <- outCombined$aligned$lower[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-        outCombined$aligned$upper[which(outCombined$aligned$name==target)] <- outCombined$aligned$upper[which(outCombined$aligned$name==target)]+meanOriginal-meanAligned
-
-        outCombined$prediction$value[which(outCombined$prediction$name==target)] <- outCombined$prediction$value[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-        #outCombined$prediction$sigma[which(outCombined$prediction$name==target)] <- outCombined$prediction$sigma[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-        outCombined$prediction$lower[which(outCombined$prediction$name==target)] <- outCombined$prediction$lower[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
-        outCombined$prediction$upper[which(outCombined$prediction$name==target)] <- outCombined$prediction$upper[which(outCombined$prediction$name==target)]+meanOriginal-meanPrediction
+  if (keepOriginalScale != "none" && normalizeInput) {
+    warning("To keep the original scale, use normalizeInput = FALSE")
+  }
+  if (keepOriginalScale %in% c("lin", "log")) {
+    cols <- c("value", "sigma", "lower", "upper")
+    if (keepOriginalScale == "log") cols <- c("value", "lower", "upper")
+    for (target in unique(outCombined$original$name)) {
+      meanOriginal <- mean(subset(outCombined$original, name == target)$value)
+      for (tab in c("scaled", "aligned", "prediction")) {
+        rows <- which(outCombined[[tab]]$name == target)
+        meanTab <- mean(subset(outCombined[[tab]], name == target)$value)
+        for (col in cols) {
+          x <- outCombined[[tab]][[col]][rows]
+          outCombined[[tab]][[col]][rows] <- if (keepOriginalScale == "lin") {
+            x * meanOriginal / meanTab
+          } else {
+            x + meanOriginal - meanTab
+          }
+        }
       }
     }
   }
@@ -629,33 +458,22 @@ alignReplicates <- function(data,
     original = outCombined$original,
     originalWithParameters = outCombined$originalWithParameters,
     parameter = parTable,
+    multistart = do.call(rbind, lapply(ok, function(o) o$multistart)),
     biological = effectsValues[[1]],
     scaling = effectsValues[[2]],
     error = effectsValues[[3]],
-    outputScale = outputScale
+    outputScale = outputScale,
+    likelihood = likelihood,
+    likelihoodDf = if (likelihood == "t") df else NULL
   )
 
   if (namesFactored == TRUE) {
-    returnList$aligned$name <- factor(
-      returnList$aligned$name,
-      levels = unique(returnList$aligned$name)
-    )
-    returnList$scaled$name <- factor(
-      returnList$scaled$name,
-      levels = unique(returnList$scaled$name)
-    )
-    returnList$prediction$name <- factor(
-      returnList$prediction$name,
-      levels = unique(returnList$prediction$name)
-    )
-    returnList$original$name <- factor(
-      returnList$original$name,
-      levels = unique(returnList$original$name)
-    )
-    returnList$originalWithParameters$name <- factor(
-      returnList$originalWithParameters$name,
-      levels = unique(returnList$originalWithParameters$name)
-    )
+    for (tab in c("aligned", "scaled", "prediction", "original", "originalWithParameters")) {
+      returnList[[tab]]$name <- factor(
+        returnList[[tab]]$name,
+        levels = unique(returnList[[tab]]$name)
+      )
+    }
   }
 
   return(returnList)

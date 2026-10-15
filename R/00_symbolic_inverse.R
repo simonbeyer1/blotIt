@@ -1,14 +1,5 @@
-# ==========================================================================
-# Symbolic model inversion via SymPy (Python), reticulate integration
-#
-# - .onLoad() declares the Python dependency via py_require()
-# - A lazy cache holds the imported Python module
-# - An accessor function initialises it on first use (delay_load)
-# - R functions call into the cached module
-# ==========================================================================
+# Symbolic model inversion via SymPy (Python, through reticulate).
 
-
-# ---- Package initialization -----------------------------------------------
 
 #' @keywords internal
 #' @importFrom reticulate py_require
@@ -17,19 +8,13 @@
   reticulate::py_require("sympy")
 }
 
-
-# ---- Lazy Python module cache ---------------------------------------------
-
 #' @keywords internal
 #' @noRd
 .blotit_py_cache <- new.env(parent = emptyenv())
 
-#' Get the cached symbolic_inverse Python module
+#' Cached `symbolic_inverse` Python module from `inst/python/`
 #'
-#' On first call the module is imported from \code{inst/python/} with
-#' \code{delay_load = TRUE}; subsequent calls return the cached reference.
-#'
-#' @return A reticulate Python module reference.
+#' @return reticulate module reference, imported lazily on first call.
 #' @keywords internal
 #' @importFrom reticulate import_from_path
 #' @noRd
@@ -47,47 +32,24 @@ get_symbolic_inverse_py <- function() {
 }
 
 
-# ---- symbolicInverse() ----------------------------------------------------
+# symbolicInverse() --------------------------------------------------------
 
-#' Analytically invert a model equation using SymPy via reticulate
+#' Solve `model == value` for the biological parameter with SymPy
 #'
-#' Given a model string like \code{"yi / sj"} and the name of the
-#' biological parameter (e.g. \code{"yi"}), this function calls the
-#' Python module \code{symbolic_inverse.invert_model()} to solve the
-#' equation \code{model == value} for \code{yi}.  It returns the
-#' analytical inverse together with its derivative w.r.t. \code{value}
-#' (needed for Gaussian error propagation when scaling sigma).
+#' @param model model string before log-scale or index substitutions.
+#' @param bioPar biological parameter to solve for.
+#' @param allSymbols all model symbols except data columns.
+#' @param verbose logical, print diagnostics.
 #'
-#' If SymPy cannot find an analytical solution (e.g. transcendental
-#' equations), the function returns \code{NULL} and the caller should
-#' fall back to numerical inversion.
-#'
-#' @param model Character string of the model, e.g. \code{"yi / sj"}.
-#'   This is the \emph{original} model before log-scale or index
-#'   substitutions.
-#' @param bioPar Character, the biological parameter to solve for.
-#' @param allSymbols Character vector of all symbols in the model
-#'   (excluding data columns).
-#' @param verbose Logical, print diagnostic information.
-#'
-#' @return If successful, a list with:
-#' \describe{
-#'   \item{\code{inverseExpr}}{Character string: R expression for the
-#'     inverse.  The variable \code{value} represents the observed
-#'     measurement.}
-#'   \item{\code{inverseDerivExpr}}{Character string: R expression for
-#'     \code{d(inverse)/d(value)}.}
-#' }
-#' Returns \code{NULL} if analytical inversion fails or reticulate /
-#' SymPy are unavailable.
+#' @return list with strings `inverseExpr` (inverse in terms of `value`) and
+#'   `inverseDerivExpr` (its derivative with respect to `value`), or `NULL` if
+#'   no closed form exists or SymPy is unavailable.
 #'
 #' @noRd
 symbolicInverse <- function(model,
                             bioPar,
                             allSymbols,
                             verbose = FALSE) {
-
-  ## Obtain the Python module (lazy-loaded)
   pymod <- tryCatch(
     get_symbolic_inverse_py(),
     error = function(e) NULL
@@ -100,7 +62,6 @@ symbolicInverse <- function(model,
     return(NULL)
   }
 
-  ## Call Python: invert_model(model_str, bio_par, all_symbols)
   result <- tryCatch(
     pymod$invert_model(
       model_str = model,
@@ -116,13 +77,11 @@ symbolicInverse <- function(model,
     }
   )
 
-  ## Python returns None (mapped to NULL) when no solution exists
   if (is.null(result)) {
     if (verbose) cat("No analytical inverse found for '", bioPar, "'.\n")
     return(NULL)
   }
 
-  ## Convert reticulate dict to R list
   result <- as.list(result)
 
   inverseStr <- result$inverse
@@ -140,34 +99,27 @@ symbolicInverse <- function(model,
 }
 
 
-# ---- prepareAnalyticInverse() ---------------------------------------------
+# prepareAnalyticInverse() -------------------------------------------------
 
-#' Prepare the analytical inverse expressions for use in scaleTarget
+#' Apply the forward-model substitutions to the analytic inverse
 #'
-#' Takes the raw output of \code{symbolicInverse} and applies the same
-#' transformations that \code{alignReplicates} applies to the forward
-#' model: (1) log-scale substitution if \code{fitLogscale = TRUE},
-#' (2) index-bracket substitution for effect categories.
+#' @param symbolicResult output of `symbolicInverse()`, or `NULL`.
+#' @param parameters character vector of parameters named by effect class.
+#' @param fitLogscale logical.
 #'
-#' @param symbolicResult Output of \code{symbolicInverse}, or \code{NULL}.
-#' @param parameters Named character vector (names = effect category,
-#'   values = parameter names), as constructed in \code{alignReplicates}.
-#' @param fitLogscale Logical.
-#'
-#' @return A list with parsed R expressions \code{inverseExpr} and
-#'   \code{inverseDerivExpr} ready for \code{eval()}, or \code{NULL}.
+#' @return list with parsed `inverseExpr`, `inverseDerivExpr` and their
+#'   strings, or `NULL`.
 #'
 #' @noRd
 prepareAnalyticInverse <- function(symbolicResult,
                                    parameters,
                                    fitLogscale) {
-
   if (is.null(symbolicResult)) return(NULL)
 
   inverseStr <- symbolicResult$inverseExpr
   inverseDerivStr <- symbolicResult$inverseDerivExpr
 
-  ## (1) Apply log-scale transformation: replace each parameter p by exp(p)
+  ## Same substitutions as the forward model: p -> exp(p), then p -> p[class]
   if (fitLogscale) {
     inverseStr <- replaceSymbols(
       parameters,
@@ -181,14 +133,12 @@ prepareAnalyticInverse <- function(symbolicResult,
     )
   }
 
-  ## (2) Apply index-bracket substitution: p -> p[effect_category]
   for (n in seq_along(parameters)) {
     bracket <- paste0(parameters[n], "[", names(parameters)[n], "]")
     inverseStr <- replaceSymbols(parameters[n], bracket, inverseStr)
     inverseDerivStr <- replaceSymbols(parameters[n], bracket, inverseDerivStr)
   }
 
-  ## Parse to R expressions
   inverseExpr <- tryCatch(
     parse(text = inverseStr),
     error = function(e) NULL
@@ -209,33 +159,21 @@ prepareAnalyticInverse <- function(symbolicResult,
 }
 
 
-# ---- evaluateAnalyticInverse() -------------------------------------------
+# evaluateAnalyticInverse() ------------------------------------------------
 
-#' Evaluate the analytical inverse to compute scaled values
+#' Evaluate the analytic inverse at the fitted parameters
 #'
-#' Given fitted parameters and the data, evaluates the analytical inverse
-#' expression to obtain the biological parameter values on the common
-#' scale, without any numerical root-finding.
+#' @param parList named list of fitted parameter vectors.
+#' @param passParList,passParList2 as in `scaleTarget()`.
 #'
-#' @param parList Named list of fitted parameter vectors (from
-#'   \code{residualsFit[-1]}).
-#' @param passParList The standard passParList from scaleTarget.
-#' @param passParList2 The standard passParList2 from scaleTarget.
-#'
-#' @return A list with:
-#' \describe{
-#'   \item{\code{values}}{Numeric vector of scaled values.}
-#'   \item{\code{jacobian}}{Numeric vector of
-#'     \code{|d(inverse)/d(value)|}.}
-#' }
-#' Returns \code{NULL} if analytical inverse expressions are not in
-#' \code{passParList} or evaluation fails.
+#' @return list with `values` on the common scale and `jacobian`
+#'   \eqn{|d\,\mathrm{inverse}/d\,\mathrm{value}|}, or `NULL` if no analytic
+#'   inverse is available or its evaluation is not finite.
 #'
 #' @noRd
 evaluateAnalyticInverse <- function(parList,
                                     passParList,
                                     passParList2) {
-
   inverseExpr <- passParList$analyticInverseExpr
   inverseDerivExpr <- passParList$analyticInverseDerivExpr
 
@@ -243,7 +181,6 @@ evaluateAnalyticInverse <- function(parList,
 
   dataFit <- passParList2$dataFit
 
-  ## Evaluate in the same environment as the forward model
   envList <- c(as.list(dataFit), parList)
 
   values <- tryCatch(

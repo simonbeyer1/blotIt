@@ -7,31 +7,27 @@
 readWide(file, description = NULL, time = 1, header = TRUE, ...)
 }
 \arguments{
-\item{file}{character, the name of the data file.}
+\item{file}{character, path of the data file.}
 
-\item{description}{numeric index vector of the columns containing
-the description.}
+\item{description}{numeric or character vector, the columns describing the
+measurements. All other columns are targets.}
 
-\item{time}{numeric index of length 1: the time column.}
+\item{time}{numeric or character of length 1, the time column. It is
+renamed to \code{time}.}
 
-\item{header}{a logical value indicating whether the file contains
-the names of the variables as its first line.}
+\item{header}{logical, whether the first line holds the column names.}
 
-\item{...}{further arguments being passed to \link{read.csv}.}
+\item{...}{further arguments passed to \code{\link[utils:read.csv]{utils::read.csv()}}.}
 }
 \value{
-data frame with columns "name", "time", "value" and other
-columns describing the measurements.
+data frame with the description columns, \code{name} (the target) and
+\code{value}. Rows with missing values are dropped.
 }
 \description{
-Data from a given wide style csv-file is imported. While importing, the data
-is converted into a long table
+Reads a wide csv file with one column per target and returns it in long
+format.
 }
 \examples{
-## Import example data set
-simDataWideFile <- system.file(
-    "extdata", "simDataWide.csv",
-    package = "blotIt"
-)
+simDataWideFile <- system.file("extdata", "simDataWide.csv", package = "blotIt")
 readWide(simDataWideFile, description = seq_len(3))
 }

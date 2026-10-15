@@ -1,7 +1,5 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
-# R CMD check across the major platforms. blotIt additionally needs a C++
-# toolchain with OpenMP (compiled trust-region kernel) and Python + SymPy
-# (analytic model inversion via reticulate), so both are set up below.
+# R CMD check with a C++/OpenMP toolchain and Python + SymPy.
 on:
   push:
     branches: [main, devel]
@@ -47,9 +45,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Install SymPy and pin reticulate to this interpreter so the analytic
-      # model inversion is exercised. Without it blotIt silently falls back to
-      # the numerical inverse, which would leave that code path untested.
+      # Without SymPy the analytic inversion falls back to the numeric one
+      # and stays untested.
       - name: Install SymPy and point reticulate at it
         shell: bash
         run: |
