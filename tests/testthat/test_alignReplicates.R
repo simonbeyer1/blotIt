@@ -342,3 +342,25 @@ test_that("alignReplicates() - tGroup of single points equals pointwise t", {
     expect_error(fitNoisyGel(d, tGroup = "Exp_"), "requires likelihood")
     expect_error(fitNoisyGel(d, likelihood = "t", tGroup = "nope"), "columns")
 })
+
+
+# alignReplicates() - analytic inverse on the log scale -----------------------------
+
+test_that("alignReplicates() - analytic and numeric inverse agree with fitLogscale", {
+    set.seed(3)
+    d <- expand.grid(time = seq_len(6), gel = paste0("G", 1:4), stringsAsFactors = FALSE)
+    d$name <- "pX"
+    d$value <- exp(sin(d$time) + rnorm(4)[match(d$gel, unique(d$gel))] +
+        rnorm(nrow(d), 0, 0.2))
+    out <- suppressWarnings(alignReplicates(
+        d, model = "yi * sj", errorModel = "sigmaR * value",
+        biological = yi ~ name + time, scaling = sj ~ name + gel,
+        error = sigmaR ~ name, normalizeInput = FALSE, fitLogscale = TRUE
+    ))
+    p <- out$parameter
+    sj <- p$value[grepl("^sj", p$parameter)][match(d$gel, unique(d$gel))]
+    sigmaR <- p$value[grepl("^sigmaR", p$parameter)]
+    expect_equal(out$scaled$value, d$value / sj, tolerance = 1e-10)
+    expect_equal(out$scaled$sigma / out$prediction$sigma, 1 / sj, tolerance = 1e-10)
+    expect_gt(sigmaR, 0)
+})

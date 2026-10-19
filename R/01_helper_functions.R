@@ -743,8 +743,14 @@ scaleTarget <- function(currentData,
   )
 
   if (!is.null(analyticResult)) {
+    ## Same convention as the numeric path: value on the fit scale, model
+    ## derivative with respect to it
     valuesScaled <- analyticResult$values
-    myDeriv <- analyticResult$jacobian
+    myDeriv <- 1 / analyticResult$jacobian
+    if (fitLogscale == TRUE) {
+      myDeriv <- myDeriv * valuesScaled
+      valuesScaled <- log(valuesScaled)
+    }
     if (verbose) cat("done (analytic)\n")
 
   } else {

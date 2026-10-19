@@ -1,7 +1,7 @@
 Package: blotIt
 Type: Package
 Title: Software set for alignment of biological replicate data
-Version: 0.4.1
+Version: 0.4.2
 Authors@R: 
     c(
     person("Severin", "Bang", role = c("aut", "cre"),

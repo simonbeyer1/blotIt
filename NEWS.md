@@ -1,3 +1,8 @@
+# blotIt 0.4.2
+
+* `scaled` with an analytic inverse and `fitLogscale = TRUE`: values and
+  `sigma` match the numeric inverse.
+
 # blotIt 0.4.1
 
 * `alignReplicates()` gains `tGroup` for `likelihood = "t"`: the points of a
