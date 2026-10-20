@@ -1,3 +1,9 @@
+# blotIt 0.4.3
+
+* `scaled` with an analytic inverse: a point without inverse (e.g. a reading
+  below a fitted background) gets `NaN` and a warning; the other points of the
+  target are kept. Before, the whole target had no `scaled` table.
+
 # blotIt 0.4.2
 
 * `scaled` with an analytic inverse and `fitLogscale = TRUE`: values and

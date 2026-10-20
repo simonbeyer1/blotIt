@@ -364,3 +364,32 @@ test_that("alignReplicates() - analytic and numeric inverse agree with fitLogsca
     expect_equal(out$scaled$sigma / out$prediction$sigma, 1 / sj, tolerance = 1e-10)
     expect_gt(sigmaR, 0)
 })
+
+
+# alignReplicates() - background model, points below the background --------------
+
+test_that("alignReplicates() - points without inverse are NaN, the rest is scaled", {
+    set.seed(5)
+    d <- expand.grid(time = c(rep(0, 6), 1:6), gel = paste0("G", 1:4), stringsAsFactors = FALSE)
+    d$name <- "pX"
+    sj <- c(0, 0.5, -0.3, 1)[match(d$gel, unique(d$gel))]
+    bj <- c(-1, 0, -0.5, 0.5)[match(d$gel, unique(d$gel))]
+    yi <- ifelse(d$time == 0, -8, 2 + sin(d$time))
+    d$value <- log2(2^(yi + sj) + 2^bj) + rnorm(nrow(d), 0, 0.1)
+    ## one basal reading far below the background of its gel
+    d$value[1] <- d$value[1] - 2
+    out <- suppressWarnings(alignReplicates(
+        d, model = "log2(2^(yi + sj) + 2^bj)", errorModel = "exp(sigmaA)",
+        biological = yi ~ name + time, scaling = sj + bj ~ name + gel,
+        error = sigmaA ~ name, normalizeInput = FALSE, fitLogscale = FALSE
+    ))
+    sc <- out$scaled
+    o <- out$originalWithParameters
+    below <- o$value <= o$bj
+    expect_equal(nrow(sc), nrow(d))
+    expect_true(any(below))
+    expect_true(all(is.nan(sc$value[below])))
+    expect_equal(sc$value[!below], log2(2^o$value[!below] - 2^o$bj[!below]) - o$sj[!below],
+                 tolerance = 1e-10)
+    expect_true(all(is.finite(sc$value[d$time > 0])))
+})

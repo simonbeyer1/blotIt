@@ -167,8 +167,9 @@ prepareAnalyticInverse <- function(symbolicResult,
 #' @param passParList,passParList2 as in `scaleTarget()`.
 #'
 #' @return list with `values` on the common scale and `jacobian`
-#'   \eqn{|d\,\mathrm{inverse}/d\,\mathrm{value}|}, or `NULL` if no analytic
-#'   inverse is available or its evaluation is not finite.
+#'   \eqn{|d\,\mathrm{inverse}/d\,\mathrm{value}|}, `NaN` where a point has
+#'   no inverse (e.g. a reading below a fitted background), or `NULL` if no
+#'   analytic inverse is available or no point evaluates finite.
 #'
 #' @noRd
 evaluateAnalyticInverse <- function(parList,
@@ -193,10 +194,12 @@ evaluateAnalyticInverse <- function(parList,
   )
 
   if (is.null(values) || is.null(jacobian)) return(NULL)
-  if (any(!is.finite(values)) || any(!is.finite(jacobian))) return(NULL)
+  values <- suppressWarnings(as.numeric(values))
+  jacobian <- rep_len(suppressWarnings(abs(as.numeric(jacobian))), length(values))
+  ok <- is.finite(values) & is.finite(jacobian)
+  if (!any(ok)) return(NULL)
+  values[!ok] <- NaN
+  jacobian[!ok] <- NaN
 
-  return(list(
-    values = as.numeric(values),
-    jacobian = abs(as.numeric(jacobian))
-  ))
+  return(list(values = values, jacobian = jacobian))
 }

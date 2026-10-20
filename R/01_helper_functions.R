@@ -747,6 +747,11 @@ scaleTarget <- function(currentData,
     ## derivative with respect to it
     valuesScaled <- analyticResult$values
     myDeriv <- 1 / analyticResult$jacobian
+    nNoInverse <- sum(is.nan(valuesScaled))
+    if (nNoInverse > 0) {
+      warning(nNoInverse, " of ", length(valuesScaled), " points of target ",
+              currentName, " have no inverse; their scaled value is NaN.")
+    }
     if (fitLogscale == TRUE) {
       myDeriv <- myDeriv * valuesScaled
       valuesScaled <- log(valuesScaled)
